@@ -195,7 +195,7 @@ const COL_W = 38, ROW_H = 44;
 const MONTHS_PT = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const DAYS_PT = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
-let tasks = [], projectStart = null, allDays = [], fileContent = null;
+let tasks = [], projectStart = null, allDays = [], fileContent = null, cachedCSV = null;
 
 // ── DATE HELPERS ──
 function parseDate(s){ const d=new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
@@ -463,10 +463,25 @@ function hideTooltip(){ document.getElementById('tooltip').style.display='none';
 async function loadCSV(src){
   let text;
   if(typeof src === 'string'){
-    const resp = await fetch(src);
-    if(!resp.ok){ alert('Erro ao carregar '+src); return; }
-    text = await resp.text();
-  } else { text = src; }
+    // If it's a URL and we already have cached content, use it if src is DEFAULT_CSV
+    if(src === DEFAULT_CSV && cachedCSV && !fileContent) {
+      text = cachedCSV;
+    } else {
+      try {
+        const resp = await fetch(src);
+        if(!resp.ok) throw new Error('Fetch failed');
+        text = await resp.text();
+        if(src === DEFAULT_CSV) cachedCSV = text;
+      } catch(e) {
+        if(cachedCSV) text = cachedCSV;
+        else { alert('Erro ao carregar '+src); return; }
+      }
+    }
+  } else { 
+    text = src; 
+    fileContent = src; // Keep track of manually uploaded file
+  }
+  
   tasks = parseCSV(text);
   if(!tasks.length) return;
   projectStart = parseDate(document.getElementById('startDate').value) || new Date();
