@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Gráfico de Gantt compacto e interativo. Visualize cronogramas de projetos com dependências, progresso e exportação PNG.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 <title>Gantt Chart - Compacto</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -194,7 +196,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       </div>
     </div>
     <button class="btn-theme" onclick="toggleTheme()" title="Alternar entre tema Claro e Escuro">🌓</button>
-    <button class="btn" onclick="exportPNG()">Exportar Imagem</button>
+    <button class="btn" onclick="exportPNG(this)">Exportar Imagem</button>
   </div>
 </div>
 
@@ -323,29 +325,31 @@ stack.delete(t.id);
   tasks.forEach(resolve);
 }
 
-function render(){
-  const wrapper = document.getElementById('ganttWrapper');
-  wrapper.innerHTML = '';
-  if(!tasks || tasks.length === 0) return;
+// --- Funções auxiliares de posicionamento (usadas por vários sub-renders) ---
+function getPos(date) {
+  const dayIdx = allDays.findIndex(d => d.getTime() >= date.getTime());
+  if(zoomLevel === 'day') return dayIdx * COL_W;
+  if(zoomLevel === 'week') return (dayIdx / 7) * COL_W;
+  const startM = allDays[0];
+  const monthsDiff = (date.getFullYear() - startM.getFullYear()) * 12 + (date.getMonth() - startM.getMonth());
+  const dayInMonth = date.getDate();
+  return (monthsDiff * COL_W) + (dayInMonth / 30 * COL_W);
+}
 
-  // Ajuste de escala baseado no Zoom
-  if(zoomLevel === 'day') COL_W = 30;
-  else if(zoomLevel === 'week') COL_W = 60; 
-  else COL_W = 100;
+function getBarWidth(start, end, duration) {
+  if(duration === 0) return 0;
+  const s = getPos(start);
+  const e = getPos(end) + (zoomLevel === 'day' ? COL_W : (COL_W/7));
+  return Math.max(18, e - s - 4);
+}
 
-  let pMin = tasks[0].start, pMax = tasks[0].end;
-  tasks.forEach(t => {
-    if(t.start < pMin) pMin = t.start;
-    if(t.end > pMax) pMax = t.end;
-  });
-
+// --- Sub-render: Atualiza a barra de estatísticas ---
+function updateStats(pMin, pMax) {
   document.getElementById('statTasks').textContent = tasks.length;
   document.getElementById('statDays').textContent = businessDayIndex(pMax, pMin)+1;
   document.getElementById('statEnd').textContent = pMax.toLocaleDateString('pt-BR');
 
-  // Cálculo de Progresso Ponderado
-  let totalWorkDays = 0;
-  let completedWorkDays = 0;
+  let totalWorkDays = 0, completedWorkDays = 0;
   tasks.forEach(t => {
     if(t.duration > 0) {
       totalWorkDays += t.duration;
@@ -354,8 +358,10 @@ function render(){
   });
   const projectPercent = totalWorkDays > 0 ? Math.round((completedWorkDays / totalWorkDays) * 100) : 0;
   document.getElementById('statProgress').textContent = projectPercent + '%';
+}
 
-  // LISTA DE TAREFAS (Esquerda)
+// --- Sub-render: Constrói a lista de tarefas (painel esquerdo) ---
+function buildTaskList() {
   const tl = document.createElement('div'); tl.className='task-list'; tl.id='taskList';
   const savedW = localStorage.getItem('gantt_tl_width') || '450px';
   tl.style.width = savedW;
@@ -369,17 +375,11 @@ function render(){
     r.innerHTML=`<span>${t.id}</span><span class="name" title="${t.task}">${t.task}</span><span>${t.duration===0?'-':t.percent+'%'}</span><span style="color:var(--accent2)">${t.duration}d</span><span>${t.predecessor||'-'}</span>`;
     tl.appendChild(r);
   });
+  return tl;
+}
 
-  // DIVISOR REDIMENSIONÁVEL
-  const resizer = document.createElement('div');
-  resizer.className = 'resizer';
-  resizer.id = 'resizer';
-  resizer.style.left = savedW; // Acompanha a sticky da task-list
-
-  // ÁREA DO GRÁFICO (Direita)
-  const ca = document.createElement('div'); ca.className='chart-area';
-  
-  // Agrupamento de colunas para o Header
+// --- Sub-render: Calcula as colunas do header baseado no zoom ---
+function buildColumns() {
   const columns = [];
   if(zoomLevel === 'day') {
     allDays.forEach(d => columns.push({ label: d.getDate(), subLabel: DAYS_PT[d.getDay()].charAt(0), isWeekend: isWeekend(d), date: d }));
@@ -397,7 +397,11 @@ function render(){
       }
     });
   }
+  return columns;
+}
 
+// --- Sub-render: Constrói o cabeçalho do gráfico (meses + dias) ---
+function buildChartHeader(ca, columns) {
   const mRow = document.createElement('div'); mRow.className='ch-month-row';
   if(zoomLevel === 'day') {
     let curM = -1, mSpan = null;
@@ -428,28 +432,10 @@ function render(){
     dh.appendChild(cell);
   });
   ca.appendChild(dh);
+}
 
-  const rowsContainer = document.createElement('div'); rowsContainer.style.position='relative';
-  
-  // Função auxiliar de posicionamento
-  const getPos = (date) => {
-    const dayIdx = allDays.findIndex(d => d.getTime() >= date.getTime());
-    if(zoomLevel === 'day') return dayIdx * COL_W;
-    if(zoomLevel === 'week') return (dayIdx / 7) * COL_W;
-    // Para mês, fazemos uma proporção dentro do mês
-    const startM = allDays[0];
-    const monthsDiff = (date.getFullYear() - startM.getFullYear()) * 12 + (date.getMonth() - startM.getMonth());
-    const dayInMonth = date.getDate();
-    return (monthsDiff * COL_W) + (dayInMonth / 30 * COL_W);
-  };
-
-  const getWidth = (start, end, duration) => {
-    if(duration === 0) return 0;
-    const s = getPos(start);
-    const e = getPos(end) + (zoomLevel === 'day' ? COL_W : (COL_W/7));
-    return Math.max(18, e - s - 4);
-  };
-
+// --- Sub-render: Constrói as barras e milestones ---
+function buildBars(rowsContainer, columns) {
   tasks.forEach((t,i)=> {
     const row=document.createElement('div'); row.className='ch-row';
     columns.forEach(c => {
@@ -467,7 +453,7 @@ function render(){
       ms.addEventListener('mouseenter', showTooltip); ms.addEventListener('mouseleave', hideTooltip);
       row.appendChild(ms);
     } else {
-      const w = getWidth(t.start, t.end, t.duration);
+      const w = getBarWidth(t.start, t.end, t.duration);
       const bar=document.createElement('div'); bar.className='bar';
       bar.style.left=(x+2)+'px'; bar.style.width=w+'px';
       
@@ -492,8 +478,10 @@ function render(){
     }
     rowsContainer.appendChild(row);
   });
+}
 
-  // --- SETAS DE DEPENDÊNCIA (SVG) ---
+// --- Sub-render: Constrói as setas de dependência (SVG) ---
+function buildDependencyArrows(rowsContainer) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.classList.add('dep-svg');
   svg.setAttribute('width', allDays.length * COL_W);
@@ -515,7 +503,6 @@ function render(){
     if(predIdx<0) return;
     const pred = tasks[predIdx];
     
-    // Calcula X baseado no Zoom
     const pEnd = t.type==='SS' ? getPos(pred.start) + 5 : getPos(pred.end) + (zoomLevel==='day'?COL_W:5);
     const tStart = getPos(t.start);
     
@@ -528,8 +515,10 @@ function render(){
     svg.appendChild(path);
   });
   rowsContainer.appendChild(svg);
+}
 
-  // Linha do Dia de Hoje (Hoje)
+// --- Sub-render: Linha do dia de hoje ---
+function buildTodayLine(rowsContainer) {
   const today = new Date();
   today.setHours(0,0,0,0);
   const todayX = getPos(today);
@@ -540,7 +529,45 @@ function render(){
     tLine.style.height = (tasks.length * ROW_H) + 'px';
     rowsContainer.appendChild(tLine);
   }
+}
 
+// --- RENDER PRINCIPAL (orquestra os sub-renders) ---
+function render(){
+  const wrapper = document.getElementById('ganttWrapper');
+  wrapper.innerHTML = '';
+  if(!tasks || tasks.length === 0) return;
+
+  // Ajuste de escala baseado no Zoom
+  if(zoomLevel === 'day') COL_W = 30;
+  else if(zoomLevel === 'week') COL_W = 60; 
+  else COL_W = 100;
+
+  let pMin = tasks[0].start, pMax = tasks[0].end;
+  tasks.forEach(t => {
+    if(t.start < pMin) pMin = t.start;
+    if(t.end > pMax) pMax = t.end;
+  });
+
+  updateStats(pMin, pMax);
+
+  const tl = buildTaskList();
+  const savedW = localStorage.getItem('gantt_tl_width') || '450px';
+
+  // Divisor redimensionável
+  const resizer = document.createElement('div');
+  resizer.className = 'resizer';
+  resizer.id = 'resizer';
+  resizer.style.left = savedW;
+
+  // Área do gráfico
+  const ca = document.createElement('div'); ca.className='chart-area';
+  const columns = buildColumns();
+  buildChartHeader(ca, columns);
+
+  const rowsContainer = document.createElement('div'); rowsContainer.style.position='relative';
+  buildBars(rowsContainer, columns);
+  buildDependencyArrows(rowsContainer);
+  buildTodayLine(rowsContainer);
   ca.appendChild(rowsContainer); 
   
   // Sincronização de Scroll Vertical
@@ -551,7 +578,7 @@ function render(){
   wrapper.appendChild(tl); 
   wrapper.appendChild(resizer);
   wrapper.appendChild(ca);
-  initResizer(); // Ativa a lógica de arrastar
+  initResizer();
 }
 
 function initResizer() {
@@ -608,9 +635,8 @@ function showTooltip(e){
 }
 function hideTooltip(){ document.getElementById('tooltip').style.display='none'; }
 
-function exportPNG() {
+function exportPNG(btn) {
   const chart = document.getElementById('ganttWrapper');
-  const btn = event.target;
   const originalText = btn.textContent;
   
   btn.textContent = "Processando...";
@@ -646,6 +672,11 @@ function reload(){
     tasks = parseCSV(fileContent); 
     if(!tasks.length) {
       alert("O arquivo CSV parece estar vazio ou não pôde ser lido corretamente.");
+      document.getElementById('statTasks').textContent = '0';
+      document.getElementById('statDays').textContent = '0';
+      document.getElementById('statProgress').textContent = '0%';
+      document.getElementById('statEnd').textContent = '--';
+      document.getElementById('ganttWrapper').innerHTML = '';
       return;
     }
 
@@ -742,10 +773,7 @@ document.getElementById('csvFile').addEventListener('change', e=> {
   reader.readAsText(f);
 });
 
-document.getElementById('startDate').addEventListener('change', () => {
-  saveToStorage();
-  reload();
-});
+
 
 function toggleHelp(show) {
   document.getElementById('helpModal').style.display = show ? 'flex' : 'none';

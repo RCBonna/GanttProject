@@ -15,7 +15,7 @@ id;task;percent;duration;predecessor;type
 14;Revisao de Codigo;0;2;13;SS
 15;Documentacao Tecnica;0;3;12;FS
 16;Preparacao de Ambiente;0;2;15;FS
-17;Deploy em Homologacao;0;16;FS
+17;Deploy em Homologacao;0;1;16;FS
 18;Testes de Aceitacao;0;3;17;FS
 19;Ajustes Finais;0;2;18;FS
 20;Deploy em Producao;0;1;19;FS
