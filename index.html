@@ -286,21 +286,29 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 <div class="modal-overlay" id="helpModal" onclick="toggleHelp(false)">
   <div class="modal" onclick="event.stopPropagation()">
     <h3>Formato do Arquivo CSV</h3>
-    <p>O arquivo deve ser um <code>.csv</code> usando <code>;</code> ou <code>,</code> como separador. As colunas principais são:</p>
+    <p>O arquivo deve ser um <code>.csv</code> usando <code>;</code> ou <code>,</code> como separador.</p>
+    <p style="margin:8px 0 4px;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:700">Cabeçalho obrigatório:</p>
+    <code style="display:block;background:var(--surface3);padding:8px 12px;border-radius:6px;font-size:12px;color:var(--accent2);margin-bottom:12px;border:1px solid var(--border)">id;task;percent;duration;predecessor;type</code>
     <table class="csv-example-table">
       <thead>
-        <tr><th>ID</th><th>Tarefa</th><th>Dias</th><th>%</th><th>Pred</th></tr>
+        <tr><th>id</th><th>task</th><th>percent</th><th>duration</th><th>predecessor</th><th>type</th></tr>
       </thead>
       <tbody>
-        <tr><td>1</td><td>Início do Projeto</td><td>5</td><td>100</td><td>-</td></tr>
-        <tr><td>2</td><td>Desenvolvimento</td><td>10</td><td>50</td><td>1</td></tr>
-        <tr><td>3</td><td>Milestone Fim</td><td>0</td><td>0</td><td>2</td></tr>
+        <tr><td>1</td><td>Levantamento</td><td>100</td><td>3</td><td></td><td></td></tr>
+        <tr><td>2</td><td>Análise</td><td>50</td><td>2</td><td>1</td><td>FS</td></tr>
+        <tr><td>3</td><td>Design</td><td>0</td><td>4</td><td>2</td><td>SS</td></tr>
+        <tr><td>4</td><td>Marco Entrega</td><td>0</td><td>0</td><td>3</td><td>FS</td></tr>
       </tbody>
     </table>
-    <p>• <b>Dias:</b> Duração da tarefa (0 para Milestone).<br>
-       • <b>Pred:</b> ID da tarefa predecessora (opcional).<br>
-       • <b>%:</b> Percentual de conclusão (0 a 100).</p>
-    <button class="btn" style="width:100%; margin-top:10px" onclick="toggleHelp(false)">Entendi</button>
+    <div style="font-size:12px;line-height:1.8;margin-top:10px">
+      <p style="margin:0">• <b>id:</b> Identificador numérico único da tarefa.</p>
+      <p style="margin:0">• <b>task:</b> Nome descritivo da tarefa.</p>
+      <p style="margin:0">• <b>percent:</b> Progresso de 0 a 100.</p>
+      <p style="margin:0">• <b>duration:</b> Duração em dias úteis (0 = Milestone ◆).</p>
+      <p style="margin:0">• <b>predecessor:</b> ID da tarefa predecessora (vazio se nenhuma).</p>
+      <p style="margin:0">• <b>type:</b> Tipo de dependência — <code>FS</code> (Finish-to-Start) ou <code>SS</code> (Start-to-Start).</p>
+    </div>
+    <button class="btn" style="width:100%; margin-top:14px" onclick="toggleHelp(false)">Entendi</button>
   </div>
 </div>
 
