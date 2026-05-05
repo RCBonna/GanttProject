@@ -157,7 +157,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   font-size:9px;font-weight:700;color:#fff;
   z-index:1;min-width:18px;overflow:hidden;
   border:1px solid rgba(255,255,255,0.1);
-  cursor: pointer;
+  cursor: pointer; transform-origin: left;
 }
 .milestone {
   position:absolute;top:10px;width:14px;height:14px;
@@ -173,9 +173,45 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .tooltip{
   position:fixed;background:var(--surface2);border:1px solid var(--border);
   border-radius:8px;padding:10px 14px;pointer-events:none;z-index:100;
-  box-shadow:0 8px 25px rgba(0,0,0,.5);display:none;font-size:11px; min-width: 180px;
+  box-shadow:0 8px 25px rgba(0,0,0,.5);display:none;font-size:11px; min-width: 200px;
+  max-width:280px; transition: opacity 0.15s;
 }
-.today-line{position:absolute;top:0;width:1px;background:var(--success);z-index:2;opacity:.5}
+.tooltip .tip-progress-track{width:100%;height:4px;background:var(--surface3);border-radius:2px;margin-top:8px;overflow:hidden}
+.tooltip .tip-progress-fill{height:100%;border-radius:2px;transition:width 0.3s}
+.tooltip .tip-row{display:flex;justify-content:space-between;margin-bottom:4px}
+.tooltip .tip-label{color:var(--text2)}
+.tooltip .tip-value{color:var(--text);font-weight:600}
+.tooltip .tip-badge{display:inline-block;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(108,92,231,.2);color:var(--accent2);margin-left:4px}
+
+/* TODAY LINE - Enhanced */
+.today-line{position:absolute;top:0;width:2px;background:var(--success);z-index:2;opacity:.8;animation:todayPulse 2s ease-in-out 1}
+.today-label{position:absolute;top:-22px;left:50%;transform:translateX(-50%);background:var(--success);color:#fff;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;letter-spacing:0.5px}
+.today-label::after{content:'';position:absolute;bottom:-3px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:4px solid var(--success)}
+@keyframes todayPulse{0%{opacity:.3;box-shadow:0 0 0 0 rgba(0,206,201,.4)}50%{opacity:1;box-shadow:0 0 8px 2px rgba(0,206,201,.3)}100%{opacity:.8;box-shadow:none}}
+
+/* LOADING OVERLAY */
+.loading-overlay{position:fixed;inset:0;background:rgba(15,17,23,.6);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(2px);opacity:0;animation:fadeIn 0.2s ease forwards}
+.loading-spinner{width:36px;height:36px;border:3px solid var(--surface3);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite}
+.loading-text{color:var(--text2);font-size:12px;font-weight:600;margin-top:12px}
+.loading-content{display:flex;flex-direction:column;align-items:center;gap:4px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{to{opacity:1}}
+
+/* BAR ENTRY ANIMATION */
+.bar{animation:barSlideIn 0.4s ease both}
+.milestone{animation:milestonePopIn 0.4s ease both}
+@keyframes barSlideIn{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
+@keyframes milestonePopIn{from{transform:rotate(45deg) scale(0);opacity:0}to{transform:rotate(45deg) scale(1);opacity:1}}
+
+/* KEYBOARD SHORTCUTS BADGE */
+.kbd-hint{position:fixed;bottom:16px;right:16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--text3);cursor:pointer;z-index:50;transition:all 0.2s;display:flex;align-items:center;gap:6px;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.kbd-hint:hover{background:var(--surface3);color:var(--text);border-color:var(--accent)}
+.kbd-hint .kbd-icon{font-size:13px}
+.kbd-panel{position:fixed;bottom:52px;right:16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;z-index:51;box-shadow:0 8px 30px rgba(0,0,0,.4);display:none;min-width:200px;animation:fadeInUp 0.2s ease}
+.kbd-panel h4{font-size:11px;font-weight:700;color:var(--accent2);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px}
+.kbd-panel .kbd-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:12px}
+.kbd-panel .kbd-key{background:var(--surface3);border:1px solid var(--border);padding:2px 8px;border-radius:4px;font-family:monospace;font-size:11px;font-weight:700;color:var(--text);min-width:22px;text-align:center}
+.kbd-panel .kbd-desc{color:var(--text2)}
 
 /* HELP MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(4px)}
@@ -231,6 +267,20 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 <div class="gantt-wrapper" id="ganttWrapper"></div>
 <div class="tooltip" id="tooltip"></div>
+
+<!-- Keyboard Shortcuts Badge -->
+<div class="kbd-hint" id="kbdHint" onclick="toggleKbdPanel()">
+  <span class="kbd-icon">⌨</span> Atalhos
+</div>
+<div class="kbd-panel" id="kbdPanel">
+  <h4>Atalhos de Teclado</h4>
+  <div class="kbd-row"><span class="kbd-key">1</span><span class="kbd-desc">Zoom Dia</span></div>
+  <div class="kbd-row"><span class="kbd-key">2</span><span class="kbd-desc">Zoom Semana</span></div>
+  <div class="kbd-row"><span class="kbd-key">3</span><span class="kbd-desc">Zoom Mês</span></div>
+  <div class="kbd-row"><span class="kbd-key">T</span><span class="kbd-desc">Alternar Tema</span></div>
+  <div class="kbd-row"><span class="kbd-key">?</span><span class="kbd-desc">Ajuda CSV</span></div>
+  <div class="kbd-row"><span class="kbd-key">E</span><span class="kbd-desc">Exportar PNG</span></div>
+</div>
 
 <!-- Modal de Ajuda CSV -->
 <div class="modal-overlay" id="helpModal" onclick="toggleHelp(false)">
@@ -467,7 +517,7 @@ function buildChartHeader(ca, columns) {
   ca.appendChild(dh);
 }
 
-// --- Sub-render: Constrói as barras e milestones ---
+// --- Sub-render: Constrói as barras e milestones (com animação escalonada) ---
 function buildBars(rowsContainer, columns) {
   tasks.forEach((t,i)=> {
     const row=document.createElement('div'); row.className='ch-row';
@@ -484,12 +534,14 @@ function buildBars(rowsContainer, columns) {
       ms.style.left=(x + (zoomLevel==='day'?COL_W/2:10) - 7)+'px'; 
       ms.dataset.idx = i;
       ms.style.background = '#ff9f43'; ms.style.borderColor = '#fff';
+      ms.style.animationDelay = (i * 30) + 'ms';
       ms.addEventListener('mouseenter', showTooltip); ms.addEventListener('mouseleave', hideTooltip);
       row.appendChild(ms);
     } else {
       const w = getBarWidth(t.start, t.end, t.duration);
       const bar=document.createElement('div'); bar.className='bar';
       bar.style.left=(x+2)+'px'; bar.style.width=w+'px';
+      bar.style.animationDelay = (i * 30) + 'ms';
       
       let baseColor = BAR_COLORS[i%BAR_COLORS.length];
       if (t.percent >= 100) baseColor = 'var(--success)';
@@ -551,7 +603,7 @@ function buildDependencyArrows(rowsContainer) {
   rowsContainer.appendChild(svg);
 }
 
-// --- Sub-render: Linha do dia de hoje ---
+// --- Sub-render: Linha do dia de hoje (Enhanced: 2px, badge, pulse) ---
 function buildTodayLine(rowsContainer) {
   const today = new Date();
   today.setHours(0,0,0,0);
@@ -561,6 +613,11 @@ function buildTodayLine(rowsContainer) {
     tLine.className = 'today-line';
     tLine.style.left = todayX + 'px';
     tLine.style.height = (tasks.length * ROW_H) + 'px';
+    // "Hoje" badge label
+    const badge = document.createElement('div');
+    badge.className = 'today-label';
+    badge.textContent = 'HOJE';
+    tLine.appendChild(badge);
     rowsContainer.appendChild(tLine);
   }
 }
@@ -702,16 +759,58 @@ function setZoom(level) {
   render();
 }
 
+// --- Tooltip inteligente: viewport-aware, com dias úteis e mini progress ---
 function showTooltip(e){
   const t = tasks[e.target.dataset.idx];
+  if(!t) return;
   const tip = document.getElementById('tooltip');
-  tip.innerHTML=`<h4 style="color:var(--accent2);font-size:13px;margin-bottom:6px;font-weight:700">${t.task}</h4>
-    <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--text2)">Início:</span><strong style="color:var(--text)">${t.start.toLocaleDateString('pt-BR')}</strong></div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--text2)">Fim:</span><strong style="color:var(--text)">${t.end.toLocaleDateString('pt-BR')}</strong></div>
-    <div style="display:flex;justify-content:space-between"><span style="color:var(--text2)">Progresso:</span><strong style="color:var(--text)">${t.percent}%</strong></div>`;
-  tip.style.display='block'; tip.style.left=(e.clientX+16)+'px'; tip.style.top=(e.clientY-10)+'px';
+  
+  // Calcula dias úteis
+  const bizDays = t.duration > 0 ? t.duration : 0;
+  const depType = t.predecessor ? (t.type || 'FS') : '';
+  const depBadge = depType ? `<span class="tip-badge">${depType}</span>` : '';
+  
+  // Cor do progresso
+  let pColor = '#ff6b6b';
+  if(t.percent > 70) pColor = '#00cec9';
+  else if(t.percent > 30) pColor = '#fdcb6e';
+  
+  tip.innerHTML=`<h4 style="color:var(--accent2);font-size:13px;margin-bottom:8px;font-weight:700">${t.task}${depBadge}</h4>
+    <div class="tip-row"><span class="tip-label">Início:</span><span class="tip-value">${t.start.toLocaleDateString('pt-BR')}</span></div>
+    <div class="tip-row"><span class="tip-label">Fim:</span><span class="tip-value">${t.end.toLocaleDateString('pt-BR')}</span></div>
+    <div class="tip-row"><span class="tip-label">Duração:</span><span class="tip-value">${bizDays} dia${bizDays!==1?'s':''} útei${bizDays!==1?'s':''}</span></div>
+    <div class="tip-row"><span class="tip-label">Progresso:</span><span class="tip-value">${t.percent}%</span></div>
+    <div class="tip-progress-track"><div class="tip-progress-fill" style="width:${t.percent}%;background:${pColor}"></div></div>`;
+  
+  tip.style.display='block';
+  
+  // Viewport-aware positioning
+  const tipW = tip.offsetWidth || 220;
+  const tipH = tip.offsetHeight || 120;
+  let posX = e.clientX + 16;
+  let posY = e.clientY - 10;
+  
+  if(posX + tipW > window.innerWidth - 12) posX = e.clientX - tipW - 12;
+  if(posY + tipH > window.innerHeight - 12) posY = window.innerHeight - tipH - 12;
+  if(posY < 8) posY = 8;
+  
+  tip.style.left = posX + 'px';
+  tip.style.top = posY + 'px';
 }
 function hideTooltip(){ document.getElementById('tooltip').style.display='none'; }
+
+// --- Loading overlay helpers ---
+function showLoading(message) {
+  const overlay = document.createElement('div');
+  overlay.className = 'loading-overlay';
+  overlay.id = 'loadingOverlay';
+  overlay.innerHTML = `<div class="loading-content"><div class="loading-spinner"></div><div class="loading-text">${message || 'Processando...'}</div></div>`;
+  document.body.appendChild(overlay);
+}
+function hideLoading() {
+  const el = document.getElementById('loadingOverlay');
+  if(el) el.remove();
+}
 
 function exportPNG(btn) {
   const chart = document.getElementById('ganttWrapper');
@@ -719,6 +818,7 @@ function exportPNG(btn) {
   
   btn.textContent = "Processando...";
   btn.disabled = true;
+  showLoading('Gerando imagem...');
 
   const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
 
@@ -736,11 +836,13 @@ function exportPNG(btn) {
     
     btn.textContent = originalText;
     btn.disabled = false;
+    hideLoading();
   }).catch(err => {
     console.error("Erro na exportação:", err);
     alert("Erro ao gerar imagem. Tente novamente.");
     btn.textContent = originalText;
     btn.disabled = false;
+    hideLoading();
   });
 }
 
@@ -858,6 +960,44 @@ document.getElementById('csvFile').addEventListener('change', e=> {
 function toggleHelp(show) {
   document.getElementById('helpModal').style.display = show ? 'flex' : 'none';
 }
+
+// --- Keyboard Shortcuts Panel ---
+function toggleKbdPanel() {
+  const panel = document.getElementById('kbdPanel');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+// --- Keyboard Shortcuts Handler ---
+document.addEventListener('keydown', (e) => {
+  // Ignora se está focado em input, textarea ou contenteditable
+  const tag = e.target.tagName;
+  if(tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+  
+  switch(e.key) {
+    case '1': setZoom('day'); break;
+    case '2': setZoom('week'); break;
+    case '3': setZoom('month'); break;
+    case 't': case 'T': toggleTheme(); break;
+    case '?': toggleHelp(document.getElementById('helpModal').style.display !== 'flex'); break;
+    case 'e': case 'E':
+      const exportBtn = document.querySelector('.btn[onclick*="exportPNG"]');
+      if(exportBtn && !exportBtn.disabled) exportPNG(exportBtn);
+      break;
+    case 'Escape':
+      toggleHelp(false);
+      document.getElementById('kbdPanel').style.display = 'none';
+      break;
+  }
+});
+
+// Close kbd panel on outside click
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('kbdPanel');
+  const hint = document.getElementById('kbdHint');
+  if(panel.style.display === 'block' && !panel.contains(e.target) && !hint.contains(e.target)) {
+    panel.style.display = 'none';
+  }
+});
 
 // Inicialização
 window.addEventListener('DOMContentLoaded', loadFromStorage);
