@@ -3,11 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gantt Chart - Vue 3 Local-First</title>
+<title>Gantt Chart - Vue 3 + File System</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 <style>
+
 
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -317,37 +318,22 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 }
 
 [v-cloak] { display: none; }
+
+[v-cloak] { display: none; }
 </style>
 </head>
 <body>
 <div id="app" v-cloak>
   <div class="header">
     <div class="header-left">
-      <div style="display:flex; align-items:center; gap:8px">
-        <h1>{{ projectMetadata.name || 'Gantt Project' }}</h1>
-        <button class="btn-theme" @click="openProjectSettings" title="Configurações do Projeto" style="border:none; background:none; font-size:14px; cursor:pointer; padding:0; height:auto; margin:0">✏️</button>
-      </div>
-      <p>Gerente: {{ projectMetadata.manager || '-' }} | Início: {{ formatDatePT(projectMetadata.startDate) }}</p>
+      <h1 title="Nome do projeto">{{ projectMetadata.name || 'Gantt Project' }}</h1>
+      <p>Gerente: {{ projectMetadata.manager || '-' }} | Início: {{ projectMetadata.startDate || '-' }}</p>
     </div>
     <div class="controls">
-      <button class="btn" @click="openProjectFolder">📂 Abrir Pasta</button>
-      
-      <!-- Alternar projetos de projeto.csv -->
-      <button class="btn-secondary" @click="showProjectSelector = true" v-if="hasFolder && projectOptions.length > 0">
-        📁 Alterar Projeto
-      </button>
-
-      <!-- Feriados -->
-      <button class="btn-secondary" @click="showHolidaysModal = true" title="Gerenciar Feriados" v-if="hasFolder">
-        📅 Feriados
-      </button>
-
-      <!-- Adicionar Tarefa -->
-      <button class="btn" @click="addNewTask" v-if="hasFolder" style="background: linear-gradient(135deg, var(--success), #10ac84)">
-        ➕ Nova Tarefa
-      </button>
+      <button class="btn" @click="openProjectFolder">📂 Abrir Pasta do Projeto</button>
       
       <div class="control-group" v-if="hasFolder">
+        <label>Zoom</label>
         <div style="display:flex; background:var(--surface3); border-radius:6px; padding:2px; border:1px solid var(--border); height:36px">
           <button @click="setZoom('day')" :class="['btn-zoom', zoomLevel==='day'?'active':'']">Dia</button>
           <button @click="setZoom('week')" :class="['btn-zoom', zoomLevel==='week'?'active':'']">Sem</button>
@@ -356,21 +342,16 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       </div>
       
       <button class="btn-theme" @click="toggleTheme" title="Alternar entre tema Claro e Escuro">🌓</button>
-      <button class="btn" @click="exportPNG" v-if="hasFolder" style="background: linear-gradient(135deg, #341f97, var(--accent))">Exportar Imagem</button>
+      <!-- <button class="btn-theme" @click="showHolidaysModal=true" title="Gerenciar Feriados" style="font-size:14px" v-if="hasFolder">📅</button> -->
+      <button class="btn" @click="exportPNG" v-if="hasFolder">Exportar Imagem</button>
     </div>
   </div>
 
   <div class="stats-bar" v-if="hasFolder">
     <div class="stat"><div class="stat-icon purple">📋</div><div class="stat-info"><span class="stat-val">{{ tasks.length }}</span><span class="stat-lbl">Tarefas</span></div></div>
-    <div class="stat"><div class="stat-icon pink">📅</div><div class="stat-info"><span class="stat-val">{{ stats.days }}</span><span class="stat-lbl">Dias Úteis</span></div></div>
+    <div class="stat"><div class="stat-icon pink">📅</div><div class="stat-info"><span class="stat-val">{{ stats.days }}</span><span class="stat-lbl">Dias</span></div></div>
     <div class="stat"><div class="progress-donut" :style="{background: donutBg}"><span class="donut-val">{{ stats.progress }}%</span></div><div class="stat-info"><span class="stat-lbl" style="margin-top:4px">Progresso</span></div></div>
-    <div class="stat"><div class="stat-icon teal">🏁</div><div class="stat-info"><span class="stat-val">{{ stats.endDate }}</span><span class="stat-lbl">Término Geral</span></div></div>
-  </div>
-
-  <!-- Reconnect Warning helper -->
-  <div v-if="hasFolder && !directoryHandle" style="background: rgba(253, 203, 110, 0.15); border-bottom: 1px solid var(--warn); padding: 8px 30px; font-size: 12px; color: var(--warn); display: flex; justify-content: space-between; align-items: center;">
-    <span>⚠️ <strong>Aviso:</strong> A pasta do projeto não está conectada nesta sessão do navegador. Clique em "Abrir Pasta" para reativar o salvamento automático de alterações no disco.</span>
-    <button class="btn" @click="openProjectFolder" style="height: 24px; padding: 0 10px; font-size: 10px; background: var(--warn); color: #212529">Conectar</button>
+    <div class="stat"><div class="stat-icon teal">🏁</div><div class="stat-info"><span class="stat-val">{{ stats.endDate }}</span><span class="stat-lbl">Fim</span></div></div>
   </div>
 
   <!-- Gantt Wrapper -->
@@ -380,7 +361,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <div class="tl-header">
         <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
       </div>
-      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)">
+      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
         <span>{{ t.id }}</span>
         <span class="name" :title="t.task">{{ t.task }}</span>
         <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
@@ -407,30 +388,23 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
         <div v-for="(t, i) in tasks" :key="t.id" :class="['ch-row', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
            <div v-for="c in chartColumns" :key="c.id" :class="['ch-cell', c.isWeekend?'weekend':'', c.isHoliday?'holiday':'']" :title="c.holidayName" :style="{minWidth: colWidth+'px', maxWidth: colWidth+'px'}"></div>
            
-           <!-- Marco (Milestone) -->
-           <div v-if="t.duration===0" class="milestone" :style="{left: getMilestoneLeft(t, i) + 'px', background: '#ff9f43', borderColor: '#fff'}" @mouseenter="showTooltip($event, t, false)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)"></div>
+           <div v-if="t.duration===0" class="milestone" :style="{left: getMilestoneLeft(t, i) + 'px', background: '#ff9f43', borderColor: '#fff'}" @mouseenter="showTooltip($event, t)" @mouseleave="hideTooltip"></div>
            
-           <!-- Barra de Atividade Planejada -->
-           <div v-else class="bar" :style="{left: getBarLeft(t, i) + 'px', width: getBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, false)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
+           <div v-else class="bar" :style="{left: getBarLeft(t, i) + 'px', width: getBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t)" @mouseleave="hideTooltip">
               <div style="position:absolute; inset:0; background:#3d4457; border:1px solid var(--border); border-radius:4px;"></div>
               <div v-if="t.percent > 0" class="bar-progress" :style="{width: t.percent+'%', background: getBarColor(t, i)}"></div>
               <span class="bar-label">{{ t.percent }}%</span>
-           </div>
-
-           <!-- Linha de Execução Real (Dual bar, thinner) -->
-           <div v-if="t.realStart" class="real-bar" :style="{left: getRealBarLeft(t) + 'px', width: getRealBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, true)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
-              <div class="real-bar-fill"></div>
            </div>
         </div>
         
         <!-- Arrows SVG -->
         <svg class="dep-svg" :width="chartColumns.length * colWidth" :height="tasks.length * 34" style="pointer-events:none; z-index:0; position:absolute; top:0; left:0;">
            <defs>
-              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c5ce7"></path>
-              </marker>
+             <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+               <path d="M 0 0 L 10 5 L 0 10 z" fill="#6c5ce7"></path>
+             </marker>
            </defs>
-           <path v-for="(path, idx) in arrowPaths" :key="idx" :d="path" fill="none" stroke="#6c5ce7" stroke-width="1.5" marker-end="url(#arrow)" opacity="0.45"></path>
+           <path v-for="(path, idx) in arrowPaths" :key="idx" :d="path" fill="none" stroke="#6c5ce7" stroke-width="1.5" marker-end="url(#arrow)" opacity="0.4"></path>
         </svg>
 
         <!-- Today Line -->
@@ -443,258 +417,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
   <div class="empty-state" v-else>
     <h2>Nenhum projeto carregado</h2>
-    <p>Clique no botão acima para selecionar a pasta do seu projeto contendo os arquivos de configuração (projeto.csv, feriados.csv) e planilhas de tarefas.</p>
-    <button class="btn-cta" @click="openProjectFolder">📂 Selecionar Pasta</button>
+    <p>Clique no botão acima para selecionar a pasta do seu projeto contendo os arquivos CSV (projeto.csv, feriados.csv, tarefas.csv).</p>
   </div>
-
-  <!-- TOOLTIP DETALHADO -->
-  <div class="tooltip" id="tooltip" v-show="tooltip.show" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px', display: tooltip.show ? 'block' : 'none' }">
-    <div class="tip-row" style="margin-bottom:6px">
-      <span class="tip-badge" :style="{ background: tooltip.isReal ? 'var(--success)' : 'var(--accent)', color: tooltip.isReal ? '#212529' : 'white' }">
-        {{ tooltip.isReal ? 'REAL' : 'PLANEJADO' }}
-      </span>
-    </div>
-    <div class="tip-row" style="font-weight: 700; font-size: 12px; color: var(--text); line-height: 1.3; margin-bottom: 8px;">
-      {{ tooltip.taskName }}
-    </div>
-    <hr style="border: 0; border-top: 1px solid var(--border); margin: 6px 0;" />
-    <div class="tip-row">
-      <span class="tip-label">Duração:</span>
-      <span class="tip-value">{{ tooltip.duration }} dias</span>
-    </div>
-    <div class="tip-row">
-      <span class="tip-label">Progresso:</span>
-      <span class="tip-value">{{ tooltip.percent }}%</span>
-    </div>
-    <div class="tip-row">
-      <span class="tip-label">Início:</span>
-      <span class="tip-value">{{ tooltip.start }}</span>
-    </div>
-    <div class="tip-row">
-      <span class="tip-label">Término:</span>
-      <span class="tip-value">{{ tooltip.end }}</span>
-    </div>
-    <div class="tip-row" v-if="tooltip.predecessor && !tooltip.isReal">
-      <span class="tip-label">Predecessoras:</span>
-      <span class="tip-value">{{ tooltip.predecessor }} ({{ tooltip.type }})</span>
-    </div>
-  </div>
-
-  <!-- PROJECT SELECTOR MODAL -->
-  <div class="modal-overlay" :style="{ display: showProjectSelector ? 'flex' : 'none' }">
-    <div class="modal" style="max-width: 500px; width: 95%;">
-      <h3 style="display:flex; justify-content:space-between; align-items:center;">
-        <span>📂 Selecionar Projeto</span>
-        <button v-if="hasFolder" class="btn-remove" @click="showProjectSelector = false">✕</button>
-      </h3>
-      <p style="margin-top: 4px; font-size:12px; color:var(--text3);">
-        Escolha um dos projetos configurados no arquivo <code>projeto.csv</code> para carregar o seu cronograma correspondente.
-      </p>
-      <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
-      
-      <div style="max-height: 350px; overflow-y: auto; padding-right: 4px;">
-        <div v-for="(proj, index) in projectOptions" :key="index" class="project-card" @click="selectProject(proj)">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span class="project-card-title">{{ proj.name }}</span>
-            <span class="tip-badge" style="background: rgba(108, 92, 231, 0.15); color: var(--accent2)">{{ proj.manager || 'Sem Gerente' }}</span>
-          </div>
-          <div class="project-card-meta" style="margin-top: 4px;">
-            <span>📅 Início: <strong style="color:var(--text)">{{ formatDatePT(proj.startDate) }}</strong></span>
-            <span>📄 Planilha: <code style="color:var(--accent3)">{{ proj.tasksFile }}</code></span>
-          </div>
-        </div>
-      </div>
-      
-      <div class="modal-footer" v-if="hasFolder">
-        <button class="btn-secondary" @click="showProjectSelector = false">Fechar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- PROJECT METADATA CONFIG MODAL -->
-  <div class="modal-overlay" :style="{ display: showProjectSettingsModal ? 'flex' : 'none' }">
-    <div class="modal" style="max-width: 450px; width: 95%;">
-      <h3 style="display:flex; justify-content:space-between; align-items:center;">
-        <span>⚙️ Configurações do Projeto</span>
-        <button class="btn-remove" @click="showProjectSettingsModal = false">✕</button>
-      </h3>
-      <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
-      
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <div class="control-group">
-          <label>Nome do Projeto</label>
-          <input type="text" v-model="tempProjectMetadata.name" class="modal-input" />
-        </div>
-        
-        <div class="control-group">
-          <label>Gerente de Projeto</label>
-          <input type="text" v-model="tempProjectMetadata.manager" class="modal-input" />
-        </div>
-        
-        <div class="control-group">
-          <label>Data de Início do Projeto</label>
-          <input type="date" v-model="tempProjectMetadata.startDate" class="modal-input" />
-        </div>
-      </div>
-      
-      <div class="modal-footer" style="margin-top:20px;">
-        <button class="btn-secondary" @click="showProjectSettingsModal = false">Cancelar</button>
-        <button class="btn" @click="saveProjectSettings">Salvar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- HOLIDAYS MANAGER MODAL -->
-  <div class="modal-overlay" :style="{ display: showHolidaysModal ? 'flex' : 'none' }">
-    <div class="modal" style="max-width: 480px; width: 95%;">
-      <h3 style="display:flex; justify-content:space-between; align-items:center;">
-        <span>📅 Calendário de Feriados</span>
-        <button class="btn-remove" @click="showHolidaysModal = false">✕</button>
-      </h3>
-      <p style="margin-top: 4px; font-size:12px; color:var(--text3);">
-        Os feriados listados abaixo são considerados dias não úteis e as tarefas serão agendadas pulando estas datas.
-      </p>
-      <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
-      
-      <!-- Holiday Form -->
-      <div style="display:flex; gap:8px; margin-bottom:15px; align-items: flex-end;">
-        <div class="control-group" style="flex: 1;">
-          <label>Data <span v-if="newHolidayDate" style="color: var(--accent2)">({{ getDayOfWeekPT(newHolidayDate) }})</span></label>
-          <input type="date" v-model="newHolidayDate" class="modal-input" style="height:36px;" />
-        </div>
-        <div class="control-group" style="flex: 2;">
-          <label>Descrição</label>
-          <input type="text" v-model="newHolidayName" class="modal-input" placeholder="ex: Tiradentes" style="height:36px;" @keyup.enter="addHoliday" />
-        </div>
-        <button class="btn" @click="addHoliday" style="height:36px; padding:0 12px; flex-shrink:0;">
-          ➕ Add <span v-if="newHolidayDate" style="font-size:11px; font-weight:normal; opacity:0.85;">({{ getDayOfWeekPT(newHolidayDate) }})</span>
-        </button>
-      </div>
-
-      <!-- Holiday List -->
-      <div class="holiday-list">
-        <div v-if="Object.keys(holidaysMap).length === 0" style="padding:20px; text-align:center; color:var(--text3); font-size:13px;">
-          Nenhum feriado cadastrado.
-        </div>
-        <div v-else v-for="(name, date) in sortedHolidays" :key="date" class="holiday-item">
-          <span class="date">
-            {{ formatDatePT(date) }}
-            <span style="font-size:11px; font-weight:normal; color:var(--text3); margin-left:4px; font-family:sans-serif;">({{ getDayOfWeekPT(date) }})</span>
-          </span>
-          <span class="name" :title="name">{{ name }}</span>
-          <button class="btn-remove" @click="removeHoliday(date)" title="Remover Feriado">🗑️</button>
-        </div>
-      </div>
-      
-      <div class="modal-footer" style="margin-top:15px;">
-        <button class="btn" @click="showHolidaysModal = false">Concluído</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- TASK EDIT MODAL -->
-  <div class="modal-overlay" :style="{ display: showEditModal ? 'flex' : 'none' }">
-    <div class="modal" style="max-width: 550px; width: 95%;">
-      <h3 style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-        <span>✏️ Editar Tarefa #{{ editingTask ? editingTask.id : '' }}</span>
-        <button class="btn-remove" @click="closeEditModal">✕</button>
-      </h3>
-      <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
-      
-      <div v-if="editingTask" style="display:flex; flex-direction:column; gap:12px;">
-        <!-- Nome da Tarefa -->
-        <div class="control-group">
-          <label>Nome da Tarefa</label>
-          <input type="text" v-model="editingTask.task" class="modal-input" />
-        </div>
-        
-        <!-- Grid: Duração e Predecessoras -->
-        <div class="modal-grid-2">
-          <div class="control-group">
-            <label>Duração (dias)</label>
-            <input type="number" v-model.number="editingTask.duration" class="modal-input" min="0" />
-          </div>
-          <div class="control-group">
-            <label>Predecessoras (IDs separados por vírgula)</label>
-            <input type="text" v-model="editingTask.predecessor" class="modal-input" placeholder="ex: 1, 2" />
-          </div>
-        </div>
-        
-        <!-- Grid: Tipo de Relação e Progresso -->
-        <div class="modal-grid-2">
-          <div class="control-group">
-            <label>Tipo de Vínculo</label>
-            <select v-model="editingTask.type" class="modal-input" style="height:36px; cursor:pointer;">
-              <option value="FS">FS (Fim-Início)</option>
-              <option value="SS">SS (Início-Início)</option>
-            </select>
-          </div>
-          <div class="control-group">
-            <label>Progresso ({{ editingTask.percent }}%)</label>
-            <div style="display:flex; align-items:center; gap:8px; height:36px;">
-              <input type="range" v-model.number="editingTask.percent" min="0" max="100" class="modal-input" style="flex:1; padding:0; cursor:pointer;" @input="onProgressChange" />
-              <input type="number" v-model.number="editingTask.percent" min="0" max="100" class="modal-input" style="width:65px; height:34px; padding:4px 6px; text-align:center;" @input="onProgressChange" />
-            </div>
-          </div>
-        </div>
-
-        <hr style="border:0; border-top:1px dashed var(--border); margin:4px 0;" />
-
-        <!-- Datas Planejadas (Fixadas) -->
-        <div class="control-group" style="background: rgba(108, 92, 231, 0.05); padding: 10px; border-radius: 8px; border: 1px dashed rgba(108, 92, 231, 0.2);">
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
-            <input type="checkbox" id="lockPlanned" v-model="hasPlannedDates" style="cursor:pointer; width:16px; height:16px;" />
-            <label for="lockPlanned" style="cursor:pointer; font-weight:700; color:var(--accent2); text-transform:none; font-size:12px; margin:0;">Fixar Datas Planejadas (ignorar cálculo automático)</label>
-          </div>
-          <div class="modal-grid-2" v-if="hasPlannedDates">
-            <div class="control-group">
-              <label>Início Planejado</label>
-              <input type="date" v-model="editingTask.plannedStart" class="modal-input" />
-            </div>
-            <div class="control-group">
-              <label>Fim Planejado</label>
-              <input type="date" v-model="editingTask.plannedEnd" class="modal-input" />
-            </div>
-          </div>
-          <div style="font-size:10px; color:var(--text2); line-height:1.4;" v-else>
-            * As datas de início e fim planejadas desta tarefa estão sendo calculadas dinamicamente com base nas dependências de predecessores.
-          </div>
-        </div>
-
-        <!-- Datas Reais -->
-        <div class="control-group" style="background: rgba(32, 191, 107, 0.05); padding: 10px; border-radius: 8px; border: 1px dashed rgba(32, 191, 107, 0.2);">
-          <div style="font-weight:700; color:var(--success); font-size:12px; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
-            <span>⏱️ Linha de Execução Real</span>
-            <span style="font-size:9px; font-weight:normal; color:var(--text2)">(preenchido automaticamente baseado no progresso)</span>
-          </div>
-          <div class="modal-grid-2">
-            <div class="control-group">
-              <label>Início Real</label>
-              <input type="date" v-model="editingTask.realStart" class="modal-input" :disabled="editingTask.percent === 0" />
-            </div>
-            <div class="control-group">
-              <label>Fim Real</label>
-              <input type="date" v-model="editingTask.realEnd" class="modal-input" :disabled="editingTask.percent < 100" />
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Footer Buttons -->
-      <div class="modal-footer" style="margin-top:20px; display:flex; justify-content:space-between; align-items:center; width:100%;">
-        <div>
-          <button v-if="editingTask && tasks.some(t => t.id === editingTask.id)" class="btn" style="background: linear-gradient(135deg, #ff4757, #ff6b6b);" @click="deleteTask">
-            🗑️ Excluir
-          </button>
-        </div>
-        <div style="display:flex; gap:10px;">
-          <button class="btn-secondary" @click="closeEditModal">Cancelar</button>
-          <button class="btn" @click="saveTaskChanges">Salvar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </div>
 
 <script src="./vue_app.js"></script>
