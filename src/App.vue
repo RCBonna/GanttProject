@@ -18,9 +18,9 @@ const {
   stats,
   projectOptions, showProjectSelector,
   openProjectFolder, setZoom, loadProject, saveTasksToDisk,
-  getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
-  getRealBarLeft, getRealBarWidthPx, parseDate,
-  loadSelectedProject
+  getPlannedBarLeft, getPlannedBarWidthPx, getActualBarLeft, getActualBarWidthPx,
+  getMilestoneLeft, getBarColor, isDelayed, parseDate,
+  loadSelectedProject, recalculateTasks
 } = useGantt();
 
 // Provide state to child components
@@ -28,9 +28,9 @@ provide('gantt', {
   hasFolder, zoomLevel,
   projectMetadata, tasks, holidaysMap,
   chartColumns, chartMonths, colWidth, arrowPaths, todayX,
-  getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
-  getRealBarLeft, getRealBarWidthPx, parseDate,
-  saveTasksToDisk, loadProject
+  getPlannedBarLeft, getPlannedBarWidthPx, getActualBarLeft, getActualBarWidthPx,
+  getMilestoneLeft, getBarColor, isDelayed, parseDate,
+  saveTasksToDisk, loadProject, recalculateTasks
 });
 
 const taskListWidth = ref(450);
@@ -129,6 +129,7 @@ const progressColor = computed(() => {
         </v-btn-toggle>
 
         <v-btn icon="mdi-image-multiple" @click="exportPNG" title="Exportar PNG"></v-btn>
+        <v-btn icon="mdi-calculator" @click="recalculateTasks" title="Recalcular Cronograma"></v-btn>
         <v-btn icon="mdi-content-save" @click="saveTasksToDisk" title="Salvar Alterações"></v-btn>
         <v-btn icon="mdi-sync" @click="loadProject" title="Recarregar"></v-btn>
       </template>

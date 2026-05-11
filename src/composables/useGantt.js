@@ -63,7 +63,12 @@ export function useGantt() {
         hParsed.data.forEach(r => {
           const d = r['Data'] || r['data'] || r['date'];
           const n = r['Nome'] || r['nome'] || r['name'];
-          if (d) newHols[d] = n;
+          if (d) {
+            const parsedD = parseDate(d);
+            if (parsedD) {
+              newHols[parsedD.toISOString().split('T')[0]] = n;
+            }
+          }
         });
         holidaysMap.value = newHols;
       } catch (e) { console.warn("feriados.csv not found"); }
@@ -126,8 +131,10 @@ export function useGantt() {
         const type = (obj.type || obj.Tipo || 'FS').toUpperCase();
         
         // Novos campos para Fase 2/4
-        const realStart = obj.data_inicial_real || obj.Data_Inicial_Real || obj.real_start || null;
-        const realEnd = obj.data_final_real || obj.Data_Final_Real || obj.real_end || null;
+        const plannedStart = obj.Data_Inicial_Planejada || obj.data_inicial_planejada || obj.planned_start || obj.Planned_Start || null;
+        const plannedEnd = obj.Data_Final_Planejada || obj.data_final_planejada || obj.planned_end || obj.Planned_End || null;
+        const actualStart = obj.Data_Inicial_Real || obj.data_inicial_real || obj.actual_start || obj.Actual_Start || obj.real_start || null;
+        const actualEnd = obj.Data_Final_Real || obj.data_final_real || obj.actual_end || obj.Actual_End || obj.real_end || null;
 
         return {
           id: taskId,
@@ -136,8 +143,10 @@ export function useGantt() {
           duration: isNaN(taskDuration) ? 0 : taskDuration,
           predecessor: taskPred,
           type: type,
-          realStart: realStart,
-          realEnd: realEnd,
+          plannedStart: plannedStart,
+          plannedEnd: plannedEnd,
+          actualStart: actualStart,
+          actualEnd: actualEnd,
           start: null,
           end: null
         };
@@ -175,8 +184,10 @@ export function useGantt() {
         Progresso: t.percent,
         Predecessora: t.predecessor,
         Tipo: t.type,
-        Data_Inicial_Real: t.realStart || '',
-        Data_Final_Real: t.realEnd || ''
+        Data_Inicial_Planejada: t.plannedStart || '',
+        Data_Final_Planejada: t.plannedEnd || '',
+        Data_Inicial_Real: t.actualStart || '',
+        Data_Final_Real: t.actualEnd || ''
       }));
 
       const csvContent = Papa.unparse(dataToSave, { delimiter: ';' });
@@ -190,15 +201,17 @@ export function useGantt() {
   };
 
 
+  const recalculateTasks = () => {
+    calculateSchedule(tasks.value, projectMetadata.value.startDate, holidaysMap.value);
+    buildTimeline();
+  };
+
   const buildTimeline = () => {
     if (!tasks.value.length) return;
     let minT = null, maxT = null;
     tasks.value.forEach(t => {
-      const realS = parseDate(t.realStart);
-      const realE = parseDate(t.realEnd);
-      
-      const s = realS && realS < t.start ? realS : t.start;
-      const e = realE && realE > t.end ? realE : t.end;
+      const s = t.plannedStartDate && t.plannedStartDate < t.start ? t.plannedStartDate : t.start;
+      const e = t.plannedEndDate && t.plannedEndDate > t.end ? t.plannedEndDate : t.end;
 
       if (!minT || s < minT) minT = s;
       if (!maxT || e > maxT) maxT = e;
@@ -304,8 +317,10 @@ export function useGantt() {
     let pMin = tasks.value[0].start, pMax = tasks.value[0].end;
     let totalWork = 0, completedWork = 0;
     tasks.value.forEach(t => {
-      if (t.start < pMin) pMin = t.start;
-      if (t.end > pMax) pMax = t.end;
+      const s = t.plannedStartDate && t.plannedStartDate < t.start ? t.plannedStartDate : t.start;
+      const e = t.plannedEndDate && t.plannedEndDate > t.end ? t.plannedEndDate : t.end;
+      if (s < pMin) pMin = s;
+      if (e > pMax) pMax = e;
       if (t.duration > 0) {
         totalWork += t.duration;
         completedWork += (t.duration * (t.percent / 100));
@@ -319,40 +334,29 @@ export function useGantt() {
     };
   });
 
-  const getBarLeft = (t) => getPos(t.start) + 2;
+  const getPlannedBarLeft = (t) => getPos(t.plannedStartDate || t.start) + 2;
+  const getPlannedBarWidthPx = (t) => {
+    if (t.duration === 0) return 0;
+    const s = getPos(t.plannedStartDate || t.start);
+    const e = getPos(t.plannedEndDate || t.end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
+    return Math.max(18, e - s - 4);
+  };
+
+  const getActualBarLeft = (t) => getPos(t.start) + 2;
   const getMilestoneLeft = (t) => {
     const x = getPos(t.start);
     return x + (zoomLevel.value === 'day' ? colWidth.value / 2 : 10) - 7;
   };
-  const getBarWidthPx = (t) => {
+  const getActualBarWidthPx = (t) => {
     if (t.duration === 0) return 0;
     const s = getPos(t.start);
     const e = getPos(t.end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
     return Math.max(18, e - s - 4);
   };
   
-  // Real dates bar positioning
-  const getRealBarLeft = (t) => {
-     const rs = parseDate(t.realStart);
-     if(!rs) return getBarLeft(t); // Fallback to planned if no real start
-     return getPos(rs) + 2;
-  };
-  const getRealBarWidthPx = (t) => {
-     const rs = parseDate(t.realStart);
-     if(!rs) return 0;
-     const re = parseDate(t.realEnd);
-     // If realEnd is missing but it has start, we either draw up to today or up to calculated % based on duration
-     // We will draw it based on the % completed over the planned duration or real duration
-     const s = getPos(rs);
-     let e;
-     if(re) {
-        e = getPos(re) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
-     } else {
-        // Approximate width based on percent
-        const plannedWidth = getBarWidthPx(t);
-        return Math.max(18, plannedWidth * (t.percent / 100));
-     }
-     return Math.max(18, e - s - 4);
+  // Logic to calculate if actual end exceeds planned end (delay)
+  const isDelayed = (t) => {
+    return t.end && t.plannedEndDate && t.end > t.plannedEndDate;
   };
 
   const getBarColor = (t, i) => {
@@ -395,8 +399,8 @@ export function useGantt() {
     stats,
     projectOptions, showProjectSelector,
     openProjectFolder, setZoom, loadProject, saveTasksToDisk,
-    getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
-    getRealBarLeft, getRealBarWidthPx, parseDate,
-    loadSelectedProject
+    getPlannedBarLeft, getPlannedBarWidthPx, getActualBarLeft, getActualBarWidthPx,
+    getMilestoneLeft, getBarColor, isDelayed, parseDate,
+    loadSelectedProject, recalculateTasks
   };
 }

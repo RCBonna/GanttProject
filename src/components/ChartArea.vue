@@ -5,8 +5,8 @@ const gantt = inject('gantt');
 const openTaskModal = inject('openTaskModal');
 const {
   tasks, chartColumns, chartMonths, colWidth, arrowPaths, todayX,
-  getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
-  getRealBarLeft, getRealBarWidthPx, parseDate
+  getPlannedBarLeft, getPlannedBarWidthPx, getActualBarLeft, getActualBarWidthPx,
+  getMilestoneLeft, getBarColor, isDelayed, parseDate
 } = gantt;
 
 const ROW_H = 34;
@@ -97,35 +97,34 @@ const svgHeight = computed(() => {
 
           <!-- Task Bar -->
           <template v-else>
-            <!-- Barra de Planejado -->
+            <!-- Barra de Planejado (Baseline) -->
             <div class="bar-planned position-absolute rounded-pill"
                  :style="{ 
-                   left: getBarLeft(t) + 'px', 
-                   width: getBarWidthPx(t) + 'px',
-                   top: '10px',
-                   height: '14px',
+                   left: getPlannedBarLeft(t) + 'px', 
+                   width: getPlannedBarWidthPx(t) + 'px',
+                   top: '8px',
+                   height: '18px',
                    background: getBarColor(t, i),
-                   opacity: parseDate(t.realStart) ? 0.4 : 0.8
+                   opacity: t.actualStart ? 0.35 : 0.65
                  }"
                  :title="'Planejado: ' + t.task"
                  @dblclick="openTaskModal(t)">
-              
-              <!-- % Label -->
-              <span class="bar-label" v-if="t.percent > 0">{{ t.percent }}%</span>
             </div>
 
-            <!-- Barra de Realizado (Nova funcionalidade Fase 3) -->
-            <div v-if="parseDate(t.realStart)" class="bar-real position-absolute rounded-pill elevation-1"
+            <!-- Barra de Realizado/Forecast (Nova funcionalidade Fase 3) -->
+            <div class="bar-real position-absolute rounded-pill elevation-1"
                  :style="{ 
-                   left: getRealBarLeft(t) + 'px', 
-                   width: getRealBarWidthPx(t) + 'px',
+                   left: getActualBarLeft(t) + 'px', 
+                   width: getActualBarWidthPx(t) + 'px',
                    top: '12px',
                    height: '10px',
-                   background: 'rgba(var(--v-theme-on-surface), 0.9)',
+                   background: isDelayed(t) ? 'rgba(var(--v-theme-error), 0.9)' : 'rgba(var(--v-theme-on-surface), 0.9)',
                    border: '1px solid rgba(var(--v-theme-surface), 0.5)'
                  }"
-                 :title="'Realizado: ' + t.task"
+                 :title="'Realizado/Previsão: ' + t.task"
                  @dblclick="openTaskModal(t)">
+                 <!-- % Label -->
+                 <span class="bar-label position-absolute" v-if="t.percent > 0" style="right: 6px; top: -3px; font-size: 0.6rem;">{{ t.percent }}%</span>
             </div>
           </template>
         </div>
