@@ -54,24 +54,18 @@ Isso manterá a filosofia *Local-First* (sem necessidade de Node.js, NPM ou buil
 
 ---
 
-## 6. Fases de Implementação Propostas
+## 6. Sprints de Implementação
 
-*   **Fase 1: Infraestrutura Vue.js e Multi-Arquivos**
-    *   Refatorar o arquivo `index.html` básico para rodar dentro de uma instância do Vue 3.
-    *   Implementar a leitura e gestão dos 3 arquivos CSV (Metadados do Projeto, Feriados Globais e Lista de Tarefas).
-*   **Fase 2: Refatoração do Motor de Cronograma**
-    *   Reestruturar o objeto de tarefas para suportar `planned` e `actual`.
-    *   Modificar a lógica matemática (`calculateSchedule`) para entender a diferença entre criar um baseline original vs prever um atraso, considerando os novos Feriados e Data de Início do Projeto.
-*   **Fase 3: Motor de Renderização Gráfica**
-    *   Renderização da barra de Baseline (Fantasma) atrás da barra principal.
-    *   Inclusão das lógicas visuais de atraso e formatação.
-*   **Fase 4: Modal Premium e File System Access API**
-    *   Implementar o modal responsivo e *premium* com foco total em edição de datas e dependências através do duplo clique.
-    *   Integrar a API nativa de acesso ao File System para salvar as modificações da memória direto de volta pros CSVs correspondentes de forma transparente.
-*   **Fase 5: Adequação da Interface da Lista e Polimento**
-    *   Novas colunas na visualização à esquerda com seletores para visualizar o "Plano vs Real".
-    *   Botões de "Recalcular" manual.
-
----
-### O que você acha?
-Por favor, analise a proposta (especialmente a abordagem de renderização das barras e a decisão sobre manter Vanilla JS vs usar Vue CDN para reatividade) e me dê sinal verde para a Fase 1, ou pontue os ajustes desejados!
+*   **Sprint 1: Conclusão da Migração Vue.js & Motor de Domínio**
+    *   Finalizar a portabilidade total do `index.html` para o ecosistema Vite (`ChartArea.vue`, `TaskList.vue`, etc.).
+    *   Isolar a lógica matemática de `calculateSchedule`, `addBusinessDays` e do recém-criado suporte híbrido a `Feriados` em um arquivo de serviço independente (ex: `src/services/GanttEngine.js`).
+*   **Sprint 2: Implementação do Baseline Tracking (Planejado vs Real)**
+    *   Atualizar o parser CSV para suportar as colunas `planned_start`, `planned_end`, `actual_start`, `actual_end`.
+    *   Atualizar o `ChartArea.vue` para renderizar as duas barras simultaneamente (barra de baseline cinza/translúcida; barra de progresso sólida).
+    *   Implementar o cálculo dinâmico de Forecast (Previsão): se a barra `actual` atrasar, empurrar as sucessoras automaticamente.
+*   **Sprint 3: O Modal Premium e Local-First API**
+    *   Criar o componente `TaskEditorModal.vue` com um design sofisticado (Grid 2 colunas, validação de datas, inputs premium). O gatilho será o double-click na barra do Gantt.
+    *   Implementar a função `saveToDisk()` usando a File System Access API para salvar o CSV automaticamente na pasta do usuário sempre que o modal for fechado e houver alterações.
+*   **Sprint 4: Features Avançadas (Caminho Crítico & Desfazer)**
+    *   Desenvolver o algoritmo para encontrar e destacar o Caminho Crítico.
+    *   Implementar um History Stack simples no Vue para permitir Ctrl+Z (Desfazer) após editar o cronograma.
