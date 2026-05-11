@@ -25,7 +25,15 @@ function addDays(d, n) {
 
 function parseDate(s) {
   if (!s) return null;
-  const d = new Date(s + 'T00:00:00');
+  if (typeof s === 'object' && s instanceof Date) return isNaN(s) ? null : s;
+  const str = String(s).trim();
+  // Handle DD/MM/YYYY format
+  const brMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    const d = new Date(`${brMatch[3]}-${brMatch[2]}-${brMatch[1]}T00:00:00`);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(str + 'T00:00:00');
   return isNaN(d) ? null : d;
 }
 
@@ -47,6 +55,10 @@ const App = {
     // Column Visibility View Mode & Width Persistency with responsive minimum bounds
     const columnView = ref(localStorage.getItem('columnView') || 'planejamento');
     const taskListWidth = ref(parseInt(localStorage.getItem('taskListWidth')) || 450);
+
+    // Baseline & Real bar visibility toggles
+    const showBaselineBars = ref(localStorage.getItem('showBaselineBars') !== 'false');
+    const showRealBars = ref(localStorage.getItem('showRealBars') !== 'false');
     
     const minTaskListWidth = computed(() => {
       if (columnView.value === 'padrao') return 250;
@@ -82,12 +94,16 @@ const App = {
       show: false,
       x: 0,
       y: 0,
+      barType: 'planned', // 'planned', 'real', 'baseline'
       isReal: false,
       taskName: '',
       duration: 0,
       percent: 0,
       start: '',
       end: '',
+      baselineStart: '',
+      baselineEnd: '',
+      baselineDate: '',
       predecessor: '',
       type: ''
     });
@@ -219,7 +235,7 @@ const App = {
 
     // Main Tasks Saver
     const saveTasksToDisk = async () => {
-      let csvContent = "ID;Tarefa;Duracao;Progresso;Predecessora;Tipo;Data_Inicial_Real;Data_Final_Real;Data_Inicial_Planejada;Data_Final_Planejada\n";
+      let csvContent = "ID;Tarefa;Duracao;Progresso;Predecessora;Tipo;Data_Inicial_Real;Data_Final_Real;Data_Inicial_Planejada;Data_Final_Planejada;Data_Inicial_Baseline;Data_Final_Baseline;Baseline_Data\n";
       tasks.value.forEach(t => {
         const id = t.id;
         const task = t.task.replace(/"/g, '""');
@@ -231,12 +247,33 @@ const App = {
         const realEnd = t.realEnd || '';
         const plannedStart = t.plannedStart || '';
         const plannedEnd = t.plannedEnd || '';
-        csvContent += `${id};"${task}";${duration};${percent};"${pred}";"${type}";"${realStart}";"${realEnd}";"${plannedStart}";"${plannedEnd}"\n`;
+        const baselineStart = t.baselineStart || '';
+        const baselineEnd = t.baselineEnd || '';
+        const baselineDate = t.baselineDate || '';
+        csvContent += `${id};"${task}";${duration};${percent};"${pred}";"${type}";"${realStart}";"${realEnd}";"${plannedStart}";"${plannedEnd}";"${baselineStart}";"${baselineEnd}";"${baselineDate}"\n`;
       });
       
       // Save local storage cache too
       localStorage.setItem('tasks', JSON.stringify(tasks.value));
       await saveFileToDisk(projectMetadata.value.tasksFile, csvContent);
+    };
+
+    // Baseline Snapshot — copies current calculated start/end to baseline fields
+    const saveBaseline = async () => {
+      if (!tasks.value.length) return;
+      const today = getLocalISOString(new Date());
+      const hasExisting = tasks.value.some(t => t.baselineStart || t.baselineEnd);
+      if (hasExisting) {
+        if (!confirm('Já existe uma linha de base salva. Deseja sobrescrever com o planejamento atual?')) return;
+      }
+      tasks.value.forEach(t => {
+        t.baselineStart = t.start ? getLocalISOString(t.start) : '';
+        t.baselineEnd = t.end ? getLocalISOString(t.end) : '';
+        t.baselineDate = today;
+      });
+      await saveTasksToDisk();
+      recalculateStatus.value = '📸 Baseline salva com sucesso!';
+      setTimeout(() => { recalculateStatus.value = ''; }, 3000);
     };
 
     // Project Metadata Config modal saver
@@ -421,6 +458,9 @@ const App = {
           const plannedEnd = obj.data_final_planejada || obj.planned_end || '';
           const realStartStr = obj.data_inicial_real || obj.actual_start || '';
           const realEndStr = obj.data_final_real || obj.actual_end || '';
+          const baselineStart = obj.data_inicial_baseline || obj.baseline_start || '';
+          const baselineEnd = obj.data_final_baseline || obj.baseline_end || '';
+          const baselineDate = obj.baseline_data || obj.baseline_date || '';
 
           return {
             id: taskId,
@@ -433,6 +473,9 @@ const App = {
             plannedEnd: plannedEnd,
             realStart: realStartStr || null,
             realEnd: realEndStr || null,
+            baselineStart: baselineStart || '',
+            baselineEnd: baselineEnd || '',
+            baselineDate: baselineDate || '',
             start: null,
             end: null
           };
@@ -534,6 +577,15 @@ const App = {
             const today = new Date();
             if (!maxT || today > maxT) maxT = today;
           }
+        }
+        // Check baseline dates for timeline boundaries
+        if (t.baselineStart) {
+          const bs = parseDate(t.baselineStart);
+          if (bs && (!minT || bs < minT)) minT = bs;
+        }
+        if (t.baselineEnd) {
+          const be = parseDate(t.baselineEnd);
+          if (be && (!maxT || be > maxT)) maxT = be;
         }
       });
       if (!minT || !maxT) return;
@@ -701,6 +753,36 @@ const App = {
       return Math.max(18, e - s - 4);
     };
 
+    // Baseline bar rendering
+    const getBaselineBarLeft = (t) => {
+      if (!t.baselineStart) return 0;
+      const d = parseDate(t.baselineStart);
+      return d ? getPos(d) + 2 : 0;
+    };
+
+    const getBaselineBarWidthPx = (t) => {
+      if (!t.baselineStart || !t.baselineEnd) return 0;
+      const start = parseDate(t.baselineStart);
+      const end = parseDate(t.baselineEnd);
+      if (!start || !end) return 0;
+      const s = getPos(start);
+      const e = getPos(end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
+      return Math.max(10, e - s - 4);
+    };
+
+    // Toggle helpers
+    const toggleBaselineBars = () => {
+      showBaselineBars.value = !showBaselineBars.value;
+      localStorage.setItem('showBaselineBars', showBaselineBars.value);
+    };
+    const toggleRealBars = () => {
+      showRealBars.value = !showRealBars.value;
+      localStorage.setItem('showRealBars', showRealBars.value);
+    };
+
+    // Check if any task has baseline data
+    const hasAnyBaseline = computed(() => tasks.value.some(t => t.baselineStart || t.baselineEnd));
+
     const arrowPaths = computed(() => {
       if (!tasks.value.length) return [];
       const paths = [];
@@ -779,21 +861,29 @@ const App = {
       });
     };
 
-    // Detailed Premium Tooltips
-    const showTooltip = (e, t, isReal) => {
+    // Detailed Premium Tooltips — supports 'planned', 'real', 'baseline'
+    const showTooltip = (e, t, barType) => {
       tooltip.value.show = true;
-      tooltip.value.isReal = isReal;
+      tooltip.value.barType = barType || 'planned';
+      tooltip.value.isReal = barType === 'real';
       tooltip.value.taskName = t.task;
       tooltip.value.duration = t.duration;
       tooltip.value.percent = t.percent;
 
-      if (isReal) {
+      if (barType === 'real') {
         tooltip.value.start = t.realStart ? formatDatePT(t.realStart) : '--';
         tooltip.value.end = t.realEnd ? formatDatePT(t.realEnd) : '--';
+      } else if (barType === 'baseline') {
+        tooltip.value.start = t.baselineStart ? formatDatePT(t.baselineStart) : '--';
+        tooltip.value.end = t.baselineEnd ? formatDatePT(t.baselineEnd) : '--';
       } else {
         tooltip.value.start = t.start ? formatDatePT(t.start) : '--';
         tooltip.value.end = t.end ? formatDatePT(t.end) : '--';
       }
+      // Always set baseline info for context
+      tooltip.value.baselineStart = t.baselineStart ? formatDatePT(t.baselineStart) : '';
+      tooltip.value.baselineEnd = t.baselineEnd ? formatDatePT(t.baselineEnd) : '';
+      tooltip.value.baselineDate = t.baselineDate ? formatDatePT(t.baselineDate) : '';
       tooltip.value.predecessor = t.predecessor;
       tooltip.value.type = t.type || 'FS';
 
@@ -907,6 +997,9 @@ const App = {
         plannedEnd: '',
         realStart: null,
         realEnd: null,
+        baselineStart: '',
+        baselineEnd: '',
+        baselineDate: '',
         start: null,
         end: null
       };
@@ -964,7 +1057,8 @@ const App = {
       hasFolder, directoryHandle, zoomLevel, taskListWidth, hoverTaskId,
       projectMetadata, tasks, holidaysMap,
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
-      stats, donutBg,
+      stats, donutBg, recalculateStatus,
+      showBaselineBars, showRealBars, hasAnyBaseline,
       
       // Modals Control
       showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal,
@@ -976,6 +1070,8 @@ const App = {
       addHoliday, removeHoliday, addNewTask, openEditModal, closeEditModal,
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
+      getBaselineBarLeft, getBaselineBarWidthPx,
+      saveBaseline, toggleBaselineBars, toggleRealBars,
       startResize, syncScroll, toggleTheme, exportPNG, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
     };
   }

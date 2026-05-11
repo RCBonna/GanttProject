@@ -195,6 +195,85 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   width: 100%;
 }
 
+/* BASELINE BAR (Ghost bar below planned) */
+.baseline-bar {
+  position: absolute;
+  top: 2px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(150, 150, 170, 0.2);
+  border: 1px dashed rgba(150, 150, 170, 0.35);
+  z-index: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.baseline-bar:hover {
+  height: 8px;
+  top: 1px;
+  background: rgba(150, 150, 170, 0.35);
+  box-shadow: 0 0 6px rgba(150, 150, 170, 0.3);
+}
+
+/* Toggle pill buttons */
+.toggle-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  color: var(--text3);
+  padding: 0 12px;
+  border-radius: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  height: 30px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.toggle-pill.active {
+  background: rgba(108, 92, 231, 0.12);
+  border-color: var(--accent);
+  color: var(--accent2);
+}
+.toggle-pill.active-real {
+  background: rgba(0, 206, 201, 0.1);
+  border-color: var(--success);
+  color: var(--success);
+}
+.toggle-pill:hover {
+  border-color: var(--accent2);
+  color: var(--text);
+}
+.toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text3);
+  transition: background 0.2s;
+}
+.toggle-pill.active .toggle-dot { background: var(--accent2); }
+.toggle-pill.active-real .toggle-dot { background: var(--success); }
+
+/* Baseline status toast */
+.baseline-toast {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: linear-gradient(135deg, var(--accent), #7c6cf0);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  z-index: 999;
+  box-shadow: 0 8px 30px rgba(108, 92, 231, 0.4);
+  animation: slideInRight 0.3s ease forwards;
+}
+@keyframes slideInRight { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
 .dep-svg{position:absolute;top:0;left:0;pointer-events:none;z-index:0}
 .tooltip{
   position:fixed;background:var(--surface2);border:1px solid var(--border);
@@ -342,6 +421,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
         📅 Feriados
       </button>
 
+      <!-- Salvar Baseline -->
+      <button class="btn" @click="saveBaseline" v-if="hasFolder && tasks.length > 0" style="background: linear-gradient(135deg, #341f97, #6c5ce7)" title="Salvar uma fotografia do planejamento atual como Linha de Base">
+        📸 Salvar Baseline
+      </button>
+
       <!-- Adicionar Tarefa -->
       <button class="btn" @click="addNewTask" v-if="hasFolder" style="background: linear-gradient(135deg, var(--success), #10ac84)">
         ➕ Nova Tarefa
@@ -365,6 +449,18 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <div class="stat"><div class="stat-icon pink">📅</div><div class="stat-info"><span class="stat-val">{{ stats.days }}</span><span class="stat-lbl">Dias Úteis</span></div></div>
     <div class="stat"><div class="progress-donut" :style="{background: donutBg}"><span class="donut-val">{{ stats.progress }}%</span></div><div class="stat-info"><span class="stat-lbl" style="margin-top:4px">Progresso</span></div></div>
     <div class="stat"><div class="stat-icon teal">🏁</div><div class="stat-info"><span class="stat-val">{{ stats.endDate }}</span><span class="stat-lbl">Término Geral</span></div></div>
+    
+    <!-- Visibility Toggles -->
+    <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+      <button :class="['toggle-pill', showBaselineBars ? 'active' : '']" @click="toggleBaselineBars" title="Mostrar/ocultar barras de Linha de Base">
+        <span class="toggle-dot"></span>
+        Baseline
+      </button>
+      <button :class="['toggle-pill', showRealBars ? 'active-real' : '']" @click="toggleRealBars" title="Mostrar/ocultar barras de Execução Real">
+        <span class="toggle-dot"></span>
+        Real
+      </button>
+    </div>
   </div>
 
   <!-- Reconnect Warning helper -->
@@ -408,17 +504,21 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
            <div v-for="c in chartColumns" :key="c.id" :class="['ch-cell', c.isWeekend?'weekend':'', c.isHoliday?'holiday':'']" :title="c.holidayName" :style="{minWidth: colWidth+'px', maxWidth: colWidth+'px'}"></div>
            
            <!-- Marco (Milestone) -->
-           <div v-if="t.duration===0" class="milestone" :style="{left: getMilestoneLeft(t, i) + 'px', background: '#ff9f43', borderColor: '#fff'}" @mouseenter="showTooltip($event, t, false)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)"></div>
+           <div v-if="t.duration===0" class="milestone" :style="{left: getMilestoneLeft(t, i) + 'px', background: '#ff9f43', borderColor: '#fff'}" @mouseenter="showTooltip($event, t, 'planned')" @mouseleave="hideTooltip" @dblclick="openEditModal(t)"></div>
            
            <!-- Barra de Atividade Planejada -->
-           <div v-else class="bar" :style="{left: getBarLeft(t, i) + 'px', width: getBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, false)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
+           <div v-else class="bar" :style="{left: getBarLeft(t, i) + 'px', width: getBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, 'planned')" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
               <div style="position:absolute; inset:0; background:#3d4457; border:1px solid var(--border); border-radius:4px;"></div>
               <div v-if="t.percent > 0" class="bar-progress" :style="{width: t.percent+'%', background: getBarColor(t, i)}"></div>
               <span class="bar-label">{{ t.percent }}%</span>
            </div>
 
+           <!-- Barra de Baseline (Ghost bar, above planned) -->
+           <div v-if="showBaselineBars && t.baselineStart && t.baselineEnd && t.duration > 0" class="baseline-bar" :style="{left: getBaselineBarLeft(t) + 'px', width: getBaselineBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, 'baseline')" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
+           </div>
+
            <!-- Linha de Execução Real (Dual bar, thinner) -->
-           <div v-if="t.realStart" class="real-bar" :style="{left: getRealBarLeft(t) + 'px', width: getRealBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, true)" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
+           <div v-if="showRealBars && t.realStart" class="real-bar" :style="{left: getRealBarLeft(t) + 'px', width: getRealBarWidthPx(t) + 'px'}" @mouseenter="showTooltip($event, t, 'real')" @mouseleave="hideTooltip" @dblclick="openEditModal(t)">
               <div class="real-bar-fill"></div>
            </div>
         </div>
@@ -450,8 +550,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <!-- TOOLTIP DETALHADO -->
   <div class="tooltip" id="tooltip" v-show="tooltip.show" :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px', display: tooltip.show ? 'block' : 'none' }">
     <div class="tip-row" style="margin-bottom:6px">
-      <span class="tip-badge" :style="{ background: tooltip.isReal ? 'var(--success)' : 'var(--accent)', color: tooltip.isReal ? '#212529' : 'white' }">
-        {{ tooltip.isReal ? 'REAL' : 'PLANEJADO' }}
+      <span class="tip-badge" :style="{
+        background: tooltip.barType === 'real' ? 'var(--success)' : tooltip.barType === 'baseline' ? 'rgba(150,150,170,0.3)' : 'var(--accent)',
+        color: tooltip.barType === 'real' ? '#212529' : tooltip.barType === 'baseline' ? 'var(--text)' : 'white'
+      }">
+        {{ tooltip.barType === 'real' ? 'REAL' : tooltip.barType === 'baseline' ? 'BASELINE' : 'PLANEJADO' }}
       </span>
     </div>
     <div class="tip-row" style="font-weight: 700; font-size: 12px; color: var(--text); line-height: 1.3; margin-bottom: 8px;">
@@ -474,9 +577,20 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       <span class="tip-label">Término:</span>
       <span class="tip-value">{{ tooltip.end }}</span>
     </div>
-    <div class="tip-row" v-if="tooltip.predecessor && !tooltip.isReal">
+    <div class="tip-row" v-if="tooltip.predecessor && tooltip.barType === 'planned'">
       <span class="tip-label">Predecessoras:</span>
       <span class="tip-value">{{ tooltip.predecessor }} ({{ tooltip.type }})</span>
+    </div>
+    <!-- Baseline context info -->
+    <div v-if="tooltip.baselineStart && tooltip.barType !== 'baseline'" style="margin-top:6px; padding-top:6px; border-top: 1px dashed var(--border);">
+      <div class="tip-row" style="font-size:10px; opacity:0.8;">
+        <span class="tip-label">📸 Baseline:</span>
+        <span class="tip-value">{{ tooltip.baselineStart }} → {{ tooltip.baselineEnd }}</span>
+      </div>
+      <div class="tip-row" style="font-size:9px; opacity:0.6;">
+        <span class="tip-label">Salva em:</span>
+        <span class="tip-value">{{ tooltip.baselineDate }}</span>
+      </div>
     </div>
   </div>
 
@@ -678,6 +792,24 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
             </div>
           </div>
         </div>
+
+        <!-- Linha de Base (Read-Only) -->
+        <div v-if="editingTask.baselineStart || editingTask.baselineEnd" class="control-group" style="background: rgba(150, 150, 170, 0.05); padding: 10px; border-radius: 8px; border: 1px dashed rgba(150, 150, 170, 0.2);">
+          <div style="font-weight:700; color:var(--text2); font-size:12px; margin-bottom:8px; display:flex; align-items:center; gap:5px;">
+            <span>📸 Linha de Base</span>
+            <span v-if="editingTask.baselineDate" style="font-size:9px; font-weight:normal; color:var(--text3)">(salva em {{ formatDatePT(editingTask.baselineDate) }})</span>
+          </div>
+          <div class="modal-grid-2">
+            <div class="control-group">
+              <label>Início Baseline</label>
+              <input type="text" :value="editingTask.baselineStart ? formatDatePT(editingTask.baselineStart) : '--'" class="modal-input" disabled style="opacity:0.6; cursor:not-allowed;" />
+            </div>
+            <div class="control-group">
+              <label>Fim Baseline</label>
+              <input type="text" :value="editingTask.baselineEnd ? formatDatePT(editingTask.baselineEnd) : '--'" class="modal-input" disabled style="opacity:0.6; cursor:not-allowed;" />
+            </div>
+          </div>
+        </div>
       </div>
       
       <!-- Footer Buttons -->
@@ -694,6 +826,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       </div>
     </div>
   </div>
+
+<!-- Baseline Toast -->
+<div v-if="recalculateStatus" class="baseline-toast">{{ recalculateStatus }}</div>
 
 </div>
 
