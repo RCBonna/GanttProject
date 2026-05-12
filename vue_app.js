@@ -67,9 +67,9 @@ const App = {
     });
 
     const gridTemplate = computed(() => {
-      if (columnView.value === 'padrao') return '36px 1fr 45px 45px 45px';
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px 1fr 45px 45px 45px 85px 85px';
-      return '36px 1fr 45px 45px 45px 85px 85px 85px 85px';
+      if (columnView.value === 'padrao') return '36px minmax(60px, 1fr) 45px 45px 45px';
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(60px, 1fr) 45px 45px 45px 85px 85px';
+      return '36px minmax(60px, 1fr) 45px 45px 45px 85px 85px 85px 85px';
     });
 
     const recalculateStatus = ref('');

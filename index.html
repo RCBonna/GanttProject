@@ -115,7 +115,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 
 /* TABLE HEADER */
 .tl-header{
-  display:grid;grid-template-columns:36px 1fr 45px 45px 45px;
   padding:0 10px;height:var(--header-h);align-items:center;
   background:var(--surface2);border-bottom:1px solid var(--border);
   font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;
@@ -123,7 +122,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 }
 .tl-header span:nth-child(n+3){text-align:right; padding-right:5px}
 .tl-row{
-  display:grid;grid-template-columns:36px 1fr 45px 45px 45px;
   padding:0 10px;height:var(--row-h);align-items:center;
   border-bottom:1px solid var(--border);font-size:12px;
   cursor: pointer;
@@ -553,8 +551,14 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
       </div>
     </div>
     
-    <!-- Visibility Toggles -->
-    <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+    <!-- Visibility Toggles + View Tabs -->
+    <div style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+      <div class="view-tabs">
+        <button :class="['view-tab', columnView==='padrao'?'active':'']" @click="setColumnView('padrao')" title="Visão básica">Pad</button>
+        <button :class="['view-tab', columnView==='planejamento'?'active':'']" @click="setColumnView('planejamento')" title="Datas planejadas">Plan</button>
+        <button :class="['view-tab', columnView==='execucao'?'active':'']" @click="setColumnView('execucao')" title="Datas de execução">Exec</button>
+        <button :class="['view-tab', columnView==='completa'?'active':'']" @click="setColumnView('completa')" title="Todas as colunas">Full</button>
+      </div>
       <button :class="['toggle-pill', showBaselineBars ? 'active' : '']" @click="toggleBaselineBars" title="Mostrar/ocultar barras de Linha de Base">
         <span class="toggle-dot"></span>
         Baseline
@@ -576,43 +580,33 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div class="gantt-wrapper" id="ganttWrapper" v-if="hasFolder">
     <!-- Task List -->
     <div class="task-list" :style="{ width: taskListWidth + 'px' }" id="taskList">
-      <div class="tl-header" style="display:flex; align-items:center; justify-content:space-between; padding:0 8px;">
-        <div :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', flex:1, alignItems:'center'}">
-          <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
-          <template v-if="columnView === 'planejamento' || columnView === 'completa'">
-            <span style="font-size:8px">Início Plan.</span><span style="font-size:8px">Fim Plan.</span>
-          </template>
-          <template v-if="columnView === 'execucao' || columnView === 'completa'">
-            <span style="font-size:8px">Início Real</span><span style="font-size:8px">Fim Real</span>
-          </template>
-        </div>
-        <div class="view-tabs" style="margin-left:6px;">
-          <button :class="['view-tab', columnView==='padrao'?'active':'']" @click="setColumnView('padrao')" title="Visão básica">Pad</button>
-          <button :class="['view-tab', columnView==='planejamento'?'active':'']" @click="setColumnView('planejamento')" title="Datas planejadas">Plan</button>
-          <button :class="['view-tab', columnView==='execucao'?'active':'']" @click="setColumnView('execucao')" title="Datas de execução">Exec</button>
-          <button :class="['view-tab', columnView==='completa'?'active':'']" @click="setColumnView('completa')" title="Todas as colunas">Full</button>
-        </div>
+      <div class="tl-header" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
+        <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
+        <template v-if="columnView === 'planejamento' || columnView === 'completa'">
+          <span style="font-size:8px">Início Plan.</span><span style="font-size:8px">Fim Plan.</span>
+        </template>
+        <template v-if="columnView === 'execucao' || columnView === 'completa'">
+          <span style="font-size:8px">Início Real</span><span style="font-size:8px">Fim Real</span>
+        </template>
       </div>
-      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)">
-        <div :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center', width:'100%'}">
-          <span>{{ t.id }}</span>
-          <span class="name" :title="t.task">
-            {{ t.task }}
-            <span v-if="getTaskDelay(t) > 0" class="delay-badge">+{{ getTaskDelay(t) }}d</span>
-            <span v-else-if="getTaskDelay(t) < 0" class="delay-badge ahead-badge">{{ getTaskDelay(t) }}d</span>
-          </span>
-          <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
-          <span style="color:var(--accent2)">{{ t.duration }}d</span>
-          <span>{{ t.predecessor || '-' }}</span>
-          <template v-if="columnView === 'planejamento' || columnView === 'completa'">
-            <span style="font-size:10px; color:var(--text2)">{{ t.start ? formatDatePT(t.start) : '--' }}</span>
-            <span style="font-size:10px; color:var(--text2)">{{ t.end ? formatDatePT(t.end) : '--' }}</span>
-          </template>
-          <template v-if="columnView === 'execucao' || columnView === 'completa'">
-            <span style="font-size:10px; color:var(--success)">{{ t.realStart ? formatDatePT(t.realStart) : '--' }}</span>
-            <span style="font-size:10px; color:var(--success)">{{ t.realEnd ? formatDatePT(t.realEnd) : '--' }}</span>
-          </template>
-        </div>
+      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
+        <span>{{ t.id }}</span>
+        <span class="name" :title="t.task">
+          {{ t.task }}
+          <span v-if="getTaskDelay(t) > 0" class="delay-badge">+{{ getTaskDelay(t) }}d</span>
+          <span v-else-if="getTaskDelay(t) < 0" class="delay-badge ahead-badge">{{ getTaskDelay(t) }}d</span>
+        </span>
+        <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
+        <span style="color:var(--accent2)">{{ t.duration }}d</span>
+        <span>{{ t.predecessor || '-' }}</span>
+        <template v-if="columnView === 'planejamento' || columnView === 'completa'">
+          <span style="font-size:10px; color:var(--text2)">{{ t.start ? formatDatePT(t.start) : '--' }}</span>
+          <span style="font-size:10px; color:var(--text2)">{{ t.end ? formatDatePT(t.end) : '--' }}</span>
+        </template>
+        <template v-if="columnView === 'execucao' || columnView === 'completa'">
+          <span style="font-size:10px; color:var(--success)">{{ t.realStart ? formatDatePT(t.realStart) : '--' }}</span>
+          <span style="font-size:10px; color:var(--success)">{{ t.realEnd ? formatDatePT(t.realEnd) : '--' }}</span>
+        </template>
       </div>
     </div>
     
