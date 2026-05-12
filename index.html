@@ -214,6 +214,83 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   box-shadow: 0 0 6px rgba(150, 150, 170, 0.3);
 }
 
+/* Delay indicator on task rows */
+.tl-row.delayed {
+  border-left: 3px solid #ff4757;
+  background: rgba(255, 71, 87, 0.03) !important;
+}
+.tl-row.delayed:hover {
+  background: rgba(255, 71, 87, 0.06) !important;
+}
+.delay-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 71, 87, 0.12);
+  color: #ff4757;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+.ahead-badge {
+  background: rgba(0, 206, 201, 0.12);
+  color: var(--success);
+}
+
+/* KPI card styles */
+.kpi-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 100%;
+}
+.kpi-val {
+  font-size: 16px;
+  font-weight: 900;
+  font-family: 'Inter', monospace;
+}
+.kpi-lbl {
+  font-size: 9px;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* Column view selector tabs */
+.view-tabs {
+  display: flex;
+  background: var(--surface3);
+  border-radius: 6px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+.view-tab {
+  padding: 4px 8px;
+  border: none;
+  background: none;
+  color: var(--text3);
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.view-tab:hover {
+  color: var(--text);
+}
+.view-tab.active {
+  background: var(--accent);
+  color: white;
+}
+
 /* Toggle pill buttons */
 .toggle-pill {
   display: flex;
@@ -450,6 +527,32 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <div class="stat"><div class="progress-donut" :style="{background: donutBg}"><span class="donut-val">{{ stats.progress }}%</span></div><div class="stat-info"><span class="stat-lbl" style="margin-top:4px">Progresso</span></div></div>
     <div class="stat"><div class="stat-icon teal">🏁</div><div class="stat-info"><span class="stat-val">{{ stats.endDate }}</span><span class="stat-lbl">Término Geral</span></div></div>
     
+    <!-- KPI: SPI -->
+    <div class="stat" v-if="stats.spi !== null" style="border-left: 1px solid var(--border); padding-left: 14px;">
+      <div class="kpi-card">
+        <span class="kpi-val" :style="{color: stats.spi >= 1 ? 'var(--success)' : stats.spi >= 0.8 ? '#fdcb6e' : '#ff4757'}">{{ stats.spi }}</span>
+        <div class="stat-info"><span class="kpi-lbl">SPI</span></div>
+      </div>
+    </div>
+    
+    <!-- KPI: Desvio Médio -->
+    <div class="stat" v-if="stats.avgDeviation !== null">
+      <div class="kpi-card">
+        <span class="kpi-val" :style="{color: stats.avgDeviation <= 0 ? 'var(--success)' : '#ff4757'}">
+          {{ stats.avgDeviation > 0 ? '+' : '' }}{{ stats.avgDeviation }}d
+        </span>
+        <div class="stat-info"><span class="kpi-lbl">Desvio Médio</span></div>
+      </div>
+    </div>
+    
+    <!-- KPI: Atrasadas -->
+    <div class="stat" v-if="stats.delayedCount > 0">
+      <div class="kpi-card">
+        <span class="kpi-val" style="color: #ff4757;">{{ stats.delayedCount }}</span>
+        <div class="stat-info"><span class="kpi-lbl">Atrasadas</span></div>
+      </div>
+    </div>
+    
     <!-- Visibility Toggles -->
     <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
       <button :class="['toggle-pill', showBaselineBars ? 'active' : '']" @click="toggleBaselineBars" title="Mostrar/ocultar barras de Linha de Base">
@@ -473,15 +576,43 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   <div class="gantt-wrapper" id="ganttWrapper" v-if="hasFolder">
     <!-- Task List -->
     <div class="task-list" :style="{ width: taskListWidth + 'px' }" id="taskList">
-      <div class="tl-header">
-        <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
+      <div class="tl-header" style="display:flex; align-items:center; justify-content:space-between; padding:0 8px;">
+        <div :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', flex:1, alignItems:'center'}">
+          <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
+          <template v-if="columnView === 'planejamento' || columnView === 'completa'">
+            <span style="font-size:8px">Início Plan.</span><span style="font-size:8px">Fim Plan.</span>
+          </template>
+          <template v-if="columnView === 'execucao' || columnView === 'completa'">
+            <span style="font-size:8px">Início Real</span><span style="font-size:8px">Fim Real</span>
+          </template>
+        </div>
+        <div class="view-tabs" style="margin-left:6px;">
+          <button :class="['view-tab', columnView==='padrao'?'active':'']" @click="setColumnView('padrao')" title="Visão básica">Pad</button>
+          <button :class="['view-tab', columnView==='planejamento'?'active':'']" @click="setColumnView('planejamento')" title="Datas planejadas">Plan</button>
+          <button :class="['view-tab', columnView==='execucao'?'active':'']" @click="setColumnView('execucao')" title="Datas de execução">Exec</button>
+          <button :class="['view-tab', columnView==='completa'?'active':'']" @click="setColumnView('completa')" title="Todas as colunas">Full</button>
+        </div>
       </div>
-      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)">
-        <span>{{ t.id }}</span>
-        <span class="name" :title="t.task">{{ t.task }}</span>
-        <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
-        <span style="color:var(--accent2)">{{ t.duration }}d</span>
-        <span>{{ t.predecessor || '-' }}</span>
+      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)">
+        <div :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center', width:'100%'}">
+          <span>{{ t.id }}</span>
+          <span class="name" :title="t.task">
+            {{ t.task }}
+            <span v-if="getTaskDelay(t) > 0" class="delay-badge">+{{ getTaskDelay(t) }}d</span>
+            <span v-else-if="getTaskDelay(t) < 0" class="delay-badge ahead-badge">{{ getTaskDelay(t) }}d</span>
+          </span>
+          <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
+          <span style="color:var(--accent2)">{{ t.duration }}d</span>
+          <span>{{ t.predecessor || '-' }}</span>
+          <template v-if="columnView === 'planejamento' || columnView === 'completa'">
+            <span style="font-size:10px; color:var(--text2)">{{ t.start ? formatDatePT(t.start) : '--' }}</span>
+            <span style="font-size:10px; color:var(--text2)">{{ t.end ? formatDatePT(t.end) : '--' }}</span>
+          </template>
+          <template v-if="columnView === 'execucao' || columnView === 'completa'">
+            <span style="font-size:10px; color:var(--success)">{{ t.realStart ? formatDatePT(t.realStart) : '--' }}</span>
+            <span style="font-size:10px; color:var(--success)">{{ t.realEnd ? formatDatePT(t.realEnd) : '--' }}</span>
+          </template>
+        </div>
       </div>
     </div>
     

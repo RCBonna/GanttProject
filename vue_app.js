@@ -682,9 +682,11 @@ const App = {
     };
 
     const stats = computed(() => {
-      if (!tasks.value.length) return { days: 0, progress: 0, endDate: '--' };
+      if (!tasks.value.length) return { days: 0, progress: 0, endDate: '--', spi: null, avgDeviation: null, delayedCount: 0 };
       let pMin = tasks.value[0].start, pMax = tasks.value[0].end;
       let totalWork = 0, completedWork = 0;
+      let totalDeviation = 0, deviationCount = 0, delayedCount = 0;
+
       tasks.value.forEach(t => {
         if (t.start < pMin) pMin = t.start;
         if (t.end > pMax) pMax = t.end;
@@ -692,12 +694,35 @@ const App = {
           totalWork += t.duration;
           completedWork += (t.duration * (t.percent / 100));
         }
+        // Calculate deviation from baseline
+        if (t.baselineEnd && t.end) {
+          const bEnd = parseDate(t.baselineEnd);
+          if (bEnd) {
+            const diffMs = t.end.getTime() - bEnd.getTime();
+            const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+            totalDeviation += diffDays;
+            deviationCount++;
+            if (diffDays > 0) delayedCount++;
+          }
+        }
       });
       const prct = totalWork > 0 ? Math.round((completedWork / totalWork) * 100) : 0;
+
+      // SPI = Earned Value / Planned Value (simplified: completed work / expected work based on time elapsed)
+      let spi = null;
+      if (deviationCount > 0 && totalWork > 0) {
+        const avgDev = totalDeviation / deviationCount;
+        // SPI approximation: if avg deviation is 0, SPI=1.0; negative deviation = ahead, positive = behind
+        spi = avgDev <= 0 ? 1.0 : Math.max(0.1, Math.round((1 / (1 + avgDev / totalWork * deviationCount)) * 100) / 100);
+      }
+
       return {
         days: getBusinessDayIndex(pMax, pMin) + 1,
         progress: prct,
-        endDate: pMax ? formatDatePT(pMax) : '--'
+        endDate: pMax ? formatDatePT(pMax) : '--',
+        spi: spi,
+        avgDeviation: deviationCount > 0 ? Math.round(totalDeviation / deviationCount * 10) / 10 : null,
+        delayedCount: delayedCount
       };
     });
 
@@ -709,6 +734,25 @@ const App = {
       const deg = (p / 100) * 360;
       return `conic-gradient(${c} ${deg}deg, var(--surface3) ${deg}deg)`;
     });
+
+    // Per-task delay detection
+    const getTaskDelay = (t) => {
+      if (!t.baselineEnd || !t.end) return 0;
+      const bEnd = parseDate(t.baselineEnd);
+      if (!bEnd) return 0;
+      return Math.round((t.end.getTime() - bEnd.getTime()) / (1000 * 60 * 60 * 24));
+    };
+
+    // Column view switcher
+    const setColumnView = (view) => {
+      columnView.value = view;
+      localStorage.setItem('columnView', view);
+      // Adjust minimum widths
+      if (taskListWidth.value < minTaskListWidth.value) {
+        taskListWidth.value = minTaskListWidth.value;
+        localStorage.setItem('taskListWidth', taskListWidth.value);
+      }
+    };
 
     const getBarLeft = (t) => getPos(t.start) + 2;
     const getMilestoneLeft = (t) => {
@@ -1059,6 +1103,7 @@ const App = {
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
       stats, donutBg, recalculateStatus,
       showBaselineBars, showRealBars, hasAnyBaseline,
+      columnView, gridTemplate, minTaskListWidth,
       
       // Modals Control
       showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal,
@@ -1070,7 +1115,7 @@ const App = {
       addHoliday, removeHoliday, addNewTask, openEditModal, closeEditModal,
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
-      getBaselineBarLeft, getBaselineBarWidthPx,
+      getBaselineBarLeft, getBaselineBarWidthPx, getTaskDelay, setColumnView,
       saveBaseline, toggleBaselineBars, toggleRealBars,
       startResize, syncScroll, toggleTheme, exportPNG, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
     };
