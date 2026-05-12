@@ -512,6 +512,84 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 }
 
 [v-cloak] { display: none; }
+
+/* TOAST NOTIFICATIONS */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10005;
+  pointer-events: none;
+}
+.toast-card {
+  pointer-events: auto;
+  min-width: 320px;
+  max-width: 480px;
+  background: var(--surface2);
+  backdrop-filter: blur(12px);
+  border-left: 4px solid var(--accent);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  border-radius: 8px;
+  padding: 14px 18px;
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  animation: slideInRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards, fadeOut 0.35s ease forwards;
+  animation-delay: 0s, var(--toast-delay, 3700ms);
+}
+@keyframes slideInRight {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes fadeOut {
+  to { opacity: 0; transform: translateY(-10px); pointer-events: none; }
+}
+.toast-card.success { border-left-color: var(--success); }
+.toast-card.error { border-left-color: #ff4757; }
+.toast-card.warn, .toast-card.warning { border-left-color: var(--warn); }
+.toast-card.info { border-left-color: var(--accent); }
+
+.toast-content { display: flex; align-items: center; gap: 10px; flex: 1; }
+.toast-icon { font-size: 16px; display: flex; align-items: center; }
+.toast-msg { font-weight: 500; line-height: 1.4; }
+.toast-close { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 12px; transition: color 0.2s; display: flex; align-items: center; }
+.toast-close:hover { color: var(--text); }
+
+/* CUSTOM DIALOG MODAL (FLUID ALERT/CONFIRM) */
+.custom-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+  animation: fadeIn 0.2s ease forwards;
+}
+.custom-dialog {
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 20px 24px;
+  width: 95%;
+  max-width: 400px;
+  box-shadow: 0 15px 40px rgba(0,0,0,0.5);
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.custom-dialog.success { border-top-color: var(--success); }
+.custom-dialog.error { border-top-color: #ff4757; }
+.custom-dialog.warn { border-top-color: var(--warn); }
 </style>
 </head>
 <body>
@@ -630,9 +708,24 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   </div>
 
   <!-- Reconnect Warning helper -->
-  <div v-if="hasFolder && !directoryHandle" style="background: rgba(253, 203, 110, 0.15); border-bottom: 1px solid var(--warn); padding: 8px 30px; font-size: 12px; color: var(--warn); display: flex; justify-content: space-between; align-items: center;">
-    <span>⚠️ <strong>Aviso:</strong> A pasta do projeto não está conectada nesta sessão do navegador. Clique em "Abrir Pasta" para reativar o salvamento automático de alterações no disco.</span>
-    <button class="btn" @click="openProjectFolder" style="height: 24px; padding: 0 10px; font-size: 10px; background: var(--warn); color: #212529">Conectar</button>
+  <div v-if="hasFolder && permissionStatus !== 'granted'" style="background: rgba(255, 184, 108, 0.08); border-bottom: 1px solid rgba(255, 184, 108, 0.3); padding: 10px 30px; font-size: 12px; color: var(--text); display: flex; justify-content: space-between; align-items: center; gap: 15px; transition: all 0.3s ease; animation: slideDown 0.4s ease-out;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 16px;">🔌</span>
+      <span>
+        <strong>Sincronização Local Suspensa:</strong> 
+        A pasta 
+        <code style="background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 4px; font-family: monospace; border: 1px solid rgba(255, 255, 255, 0.1); color: var(--accent); font-weight: bold;">
+          {{ directoryHandle?.name || 'do Projeto' }}
+        </code> 
+        requer re-autorização para habilitar o salvamento automático de alterações.
+      </span>
+    </div>
+    <button class="btn btn-primary" @click="reconnectFolder" style="height: 28px; padding: 0 16px; font-size: 11px; font-weight: 600; background: var(--accent); color: #fff; border: none; border-radius: 6px; display: flex; align-items: center; gap: 6px; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); transition: all 0.2s ease;">
+      <span>Ativar Sincronização</span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M12 5l7 7-7 7"/>
+      </svg>
+    </button>
   </div>
 
   <!-- Gantt Wrapper -->
@@ -1016,7 +1109,44 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   </div>
 
 <!-- Baseline Toast -->
-<div v-if="recalculateStatus" class="baseline-toast">{{ recalculateStatus }}</div>
+  <div v-if="recalculateStatus" class="baseline-toast">{{ recalculateStatus }}</div>
+
+  <!-- Custom Dialog Modal -->
+  <div v-if="customDialog.show" class="custom-dialog-overlay">
+    <div :class="['custom-dialog', customDialog.type]">
+      <h3 style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span>{{ customDialog.title }}</span>
+        <button class="btn-remove" @click="customDialog.reject ? customDialog.reject() : customDialog.resolve()">✕</button>
+      </h3>
+      <p style="font-size:14px; color:var(--text); line-height:1.5; margin-bottom:20px; white-space: pre-wrap;">
+        {{ customDialog.message }}
+      </p>
+      <div class="modal-footer" style="margin-top:0; display:flex; justify-content:flex-end; gap:10px;">
+        <button v-if="customDialog.type === 'confirm'" class="btn-secondary" @click="customDialog.reject()" style="height:34px;">
+          {{ customDialog.cancelText || 'Cancelar' }}
+        </button>
+        <button class="btn" @click="customDialog.resolve()" style="height:34px; padding:0 16px;">
+          {{ customDialog.confirmText || 'OK' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container">
+    <div v-for="t in toasts" :key="t.id" :class="['toast-card', t.type]" :style="{'--toast-delay': (t.duration - 350) + 'ms'}">
+      <div class="toast-content">
+        <span class="toast-icon">
+          <span v-if="t.type === 'success'">✅</span>
+          <span v-else-if="t.type === 'error'">❌</span>
+          <span v-else-if="t.type === 'warn' || t.type === 'warning'">⚠️</span>
+          <span v-else>ℹ️</span>
+        </span>
+        <span class="toast-msg">{{ t.message }}</span>
+      </div>
+      <button class="toast-close" @click="removeToast(t.id)">✕</button>
+    </div>
+  </div>
 
 </div>
 

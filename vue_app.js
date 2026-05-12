@@ -46,11 +46,76 @@ function getLocalISOString(d) {
   return `${year}-${month}-${day}`;
 }
 
+// IndexedDB Directory Handle Persistence
+const DB_NAME = 'GanttProjectDB';
+const STORE_NAME = 'handles';
+const KEY_NAME = 'projectFolder';
+
+function getDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    request.onsuccess = (e) => resolve(e.target.result);
+    request.onerror = (e) => reject(e.target.error);
+  });
+}
+
+async function saveHandleToDB(handle) {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.put(handle, KEY_NAME);
+      req.onsuccess = () => resolve(true);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  } catch (err) {
+    console.error('IndexedDB save failed', err);
+    return false;
+  }
+}
+
+async function loadHandleFromDB() {
+  try {
+    const db = await getDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(KEY_NAME);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = (e) => reject(e.target.error);
+    });
+  } catch (err) {
+    console.error('IndexedDB load failed', err);
+    return null;
+  }
+}
+
 const App = {
   setup() {
     const hasFolder = ref(false);
     const directoryHandle = ref(null);
+    const permissionStatus = ref('prompt');
     const zoomLevel = ref('day');
+    
+    // Custom Toasts and Dialogs State
+    const toasts = ref([]);
+    const customDialog = ref({
+      show: false,
+      title: '',
+      message: '',
+      type: 'alert',
+      confirmText: 'OK',
+      cancelText: 'Cancelar',
+      resolve: null,
+      reject: null
+    });
     
     // Column Visibility View Mode & Width Persistency with responsive minimum bounds
     const columnView = ref(localStorage.getItem('columnView') || 'planejamento');
@@ -126,6 +191,57 @@ const App = {
       if (zoomLevel.value === 'week') return 60;
       return 100;
     });
+
+    const addToast = (message, type = 'info', duration = 4000) => {
+      const id = Date.now() + Math.random().toString(36).substr(2, 5);
+      toasts.value.push({ id, message, type, duration });
+      setTimeout(() => {
+        removeToast(id);
+      }, duration);
+    };
+
+    const removeToast = (id) => {
+      toasts.value = toasts.value.filter(t => t.id !== id);
+    };
+
+    const showCustomAlert = (message, title = 'Aviso', type = 'info') => {
+      return new Promise((resolve) => {
+        customDialog.value = {
+          show: true,
+          title,
+          message,
+          type,
+          confirmText: 'OK',
+          cancelText: '',
+          resolve: () => {
+            customDialog.value.show = false;
+            resolve(true);
+          },
+          reject: null
+        };
+      });
+    };
+
+    const showCustomConfirm = (message, title = 'Confirmação', type = 'warn') => {
+      return new Promise((resolve) => {
+        customDialog.value = {
+          show: true,
+          title,
+          message,
+          type,
+          confirmText: 'Sim',
+          cancelText: 'Não',
+          resolve: () => {
+            customDialog.value.show = false;
+            resolve(true);
+          },
+          reject: () => {
+            customDialog.value.show = false;
+            resolve(false);
+          }
+        };
+      });
+    };
 
     const isWorkingDay = (date) => {
       const w = date.getDay();
@@ -228,7 +344,7 @@ const App = {
         return true;
       } catch (err) {
         console.error("Error writing to file " + filename, err);
-        alert(`Erro ao salvar o arquivo ${filename} no disco. Certifique-se de que a pasta está conectada e possui permissões de escrita.`);
+        addToast(`Erro ao salvar o arquivo ${filename} no disco. Certifique-se de que a pasta está conectada e possui permissões de escrita.`, 'error');
         return false;
       }
     };
@@ -264,7 +380,7 @@ const App = {
       const today = getLocalISOString(new Date());
       const hasExisting = tasks.value.some(t => t.baselineStart || t.baselineEnd);
       if (hasExisting) {
-        if (!confirm('Já existe uma linha de base salva. Deseja sobrescrever com o planejamento atual?')) return;
+        if (!await showCustomConfirm('Já existe uma linha de base salva. Deseja sobrescrever com o planejamento atual?', 'Sobrescrever Baseline', 'warn')) return;
       }
       tasks.value.forEach(t => {
         t.baselineStart = t.start ? getLocalISOString(t.start) : '';
@@ -272,8 +388,7 @@ const App = {
         t.baselineDate = today;
       });
       await saveTasksToDisk();
-      recalculateStatus.value = '📸 Baseline salva com sucesso!';
-      setTimeout(() => { recalculateStatus.value = ''; }, 3000);
+      addToast('📸 Linha de Base (Baseline) salva com sucesso!', 'success');
     };
 
     // Project Metadata Config modal saver
@@ -337,7 +452,7 @@ const App = {
 
     const addHoliday = async () => {
       if (!newHolidayDate.value || !newHolidayName.value.trim()) {
-        alert("Preencha a data e a descrição do feriado.");
+        addToast("Preencha a data e a descrição do feriado.", "warn");
         return;
       }
       const date = newHolidayDate.value;
@@ -351,7 +466,7 @@ const App = {
     };
 
     const removeHoliday = async (date) => {
-      if (confirm(`Deseja remover o feriado do dia ${formatDatePT(date)}?`)) {
+      if (await showCustomConfirm(`Deseja remover o feriado do dia ${formatDatePT(date)}?`, 'Remover Feriado', 'warn')) {
         delete holidaysMap.value[date];
         await saveHolidaysToDisk();
         calculateSchedule(tasks.value, projectMetadata.value.startDate);
@@ -411,7 +526,7 @@ const App = {
 
       } catch (err) {
         console.error("Error loading project files", err);
-        alert("Erro ao ler os arquivos do projeto.");
+        addToast("Erro ao ler os arquivos do projeto. Certifique-se de que a pasta selecionada está correta.", "error");
       }
     };
 
@@ -593,10 +708,11 @@ const App = {
       calculateSchedule(tasks.value, projectMetadata.value.startDate);
       buildTimeline();
       const forecastCount = tasks.value.filter(t => t.dateSource === 'forecast').length;
-      recalculateStatus.value = forecastCount > 0
-        ? `🔄 Previsão recalculada — ${forecastCount} tarefa(s) com forecast atualizado`
-        : '✅ Cronograma recalculado — sem impactos em cascata';
-      setTimeout(() => { recalculateStatus.value = ''; }, 4000);
+      if (forecastCount > 0) {
+        addToast(`🔄 Previsão recalculada — ${forecastCount} tarefa(s) com forecast atualizado`, 'info');
+      } else {
+        addToast('✅ Cronograma recalculado — sem impactos em cascata', 'success');
+      }
     };
 
     const buildTimeline = () => {
@@ -710,10 +826,30 @@ const App = {
         directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
         hasFolder.value = true;
         localStorage.setItem('hasFolder', 'true');
+        await saveHandleToDB(directoryHandle.value);
+        permissionStatus.value = 'granted';
         await loadProject();
       } catch (err) {
         console.error(err);
       }
+    };
+
+    const reconnectFolder = async () => {
+      if (directoryHandle.value) {
+        try {
+          const status = await directoryHandle.value.requestPermission({ mode: 'readwrite' });
+          permissionStatus.value = status;
+          if (status === 'granted') {
+            await loadProject();
+            addToast('Pasta do projeto conectada com sucesso!', 'success');
+            return;
+          }
+        } catch (err) {
+          console.error('Request permission on directory handle failed:', err);
+        }
+      }
+      // Fallback se não houver handle ou se a solicitação falhar
+      await openProjectFolder();
     };
 
     const setZoom = (level) => {
@@ -1032,7 +1168,7 @@ const App = {
 
     const deleteTask = async () => {
       if (!editingTask.value) return;
-      if (confirm(`Deseja realmente excluir a tarefa #${editingTask.value.id}?`)) {
+      if (await showCustomConfirm(`Deseja realmente excluir a tarefa #${editingTask.value.id}?`, 'Excluir Tarefa', 'error')) {
         tasks.value = tasks.value.filter(t => t.id !== editingTask.value.id);
         calculateSchedule(tasks.value, projectMetadata.value.startDate);
         buildTimeline();
@@ -1107,7 +1243,8 @@ const App = {
     });
 
     // Startup Cache Loader
-    onMounted(() => {
+    onMounted(async () => {
+      // Always load cache first for immediate rendering (UX premium!)
       const cachedHasFolder = localStorage.getItem('hasFolder') === 'true';
       if (cachedHasFolder) {
         hasFolder.value = true;
@@ -1136,23 +1273,44 @@ const App = {
           console.warn("Error parsing cache", err);
         }
       }
+
+      // Check IndexedDB handle for reconnecting
+      try {
+        const handle = await loadHandleFromDB();
+        if (handle) {
+          directoryHandle.value = handle;
+          const status = await handle.queryPermission({ mode: 'readwrite' });
+          permissionStatus.value = status;
+          if (status === 'granted') {
+            await loadProject();
+          }
+        } else {
+          permissionStatus.value = 'prompt';
+        }
+      } catch (err) {
+        console.warn('IndexedDB reconnection failed:', err);
+        permissionStatus.value = 'prompt';
+      }
     });
 
     return {
-      hasFolder, directoryHandle, zoomLevel, taskListWidth, hoverTaskId,
+      hasFolder, directoryHandle, permissionStatus, zoomLevel, taskListWidth, hoverTaskId,
       projectMetadata, tasks, holidaysMap,
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
       stats, donutBg, recalculateStatus,
       showBaselineBars, showRealBars, hasAnyBaseline,
       columnView, gridTemplate, minTaskListWidth,
       
+      // Custom Dialogs and Toasts
+      toasts, customDialog, addToast, removeToast, showCustomAlert, showCustomConfirm,
+
       // Modals Control
       showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal,
       editingTask, hasPlannedDates, projectOptions, tempProjectMetadata,
       newHolidayDate, newHolidayName, sortedHolidays, tooltip,
 
       // Operations
-      openProjectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
+      openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
       addHoliday, removeHoliday, addNewTask, openEditModal, closeEditModal,
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
