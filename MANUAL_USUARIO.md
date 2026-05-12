@@ -1,6 +1,6 @@
-# 📘 Manual do Usuário — ProjectGantt v2.0
+# 📘 Manual do Usuário — ProjectGantt v2.1
 
-> **Versão:** 2.0 (Sprint 4)  
+> **Versão:** 2.1 (Sprint 5)  
 > **Última atualização:** Maio 2026  
 > **Plataforma:** Navegador Web (Chrome/Edge recomendado)  
 > **Armazenamento:** Local-first (arquivos CSV no seu computador)
@@ -16,12 +16,13 @@
 5. [Interface Principal](#5-interface-principal)
 6. [Gerenciamento de Tarefas](#6-gerenciamento-de-tarefas)
 7. [Linha de Base (Baseline)](#7-linha-de-base-baseline)
-8. [Indicadores e KPIs](#8-indicadores-e-kpis)
-9. [Visualizações e Colunas](#9-visualizações-e-colunas)
-10. [Feriados e Calendário](#10-feriados-e-calendário)
-11. [Tema e Personalização](#11-tema-e-personalização)
-12. [Exportação](#12-exportação)
-13. [Dúvidas Frequentes](#13-dúvidas-frequentes)
+8. [Motor de Forecast Inteligente](#8-motor-de-forecast-inteligente)
+9. [Indicadores e KPIs](#9-indicadores-e-kpis)
+10. [Visualizações e Colunas](#10-visualizações-e-colunas)
+11. [Feriados e Calendário](#11-feriados-e-calendário)
+12. [Tema e Personalização](#12-tema-e-personalização)
+13. [Exportação](#13-exportação)
+14. [Dúvidas Frequentes](#14-dúvidas-frequentes)
 
 ---
 
@@ -40,6 +41,7 @@ O **ProjectGantt** é uma aplicação web de gerenciamento de projetos com gráf
 | 🗓️ Feriados | Calendário customizável que exclui dias não úteis |
 | 🌓 Tema Claro/Escuro | Interface adaptável à sua preferência |
 | 📤 Exportar Imagem | Salve o gráfico como PNG para relatórios |
+| ⚡ Motor de Forecast | Recálculo inteligente e propagação de desvios reais em cascata |
 
 ---
 
@@ -253,11 +255,44 @@ A **Linha de Base** é uma "fotografia" do cronograma planejado em um determinad
 
 ---
 
-## 8. Indicadores e KPIs
+## 8. Motor de Forecast Inteligente
+
+O **Motor de Forecast** é um algoritmo preditivo inteligente que atualiza dinamicamente as previsões das tarefas futuras com base na execução real das tarefas predecessoras.
+
+### 8.1 Como funciona o recálculo em cascata?
+
+- **Sem Execução Real:** Se nenhuma tarefa predecessora possui datas reais (`Data_Inicial_Real` ou `Data_Final_Real`), as tarefas sucessoras seguem rigorosamente as datas planejadas calculadas a partir da data de início do projeto.
+- **Propagação de Atrasos/Adiantamentos Reais:** Assim que uma tarefa é realizada ou se inicia com atraso real, o motor analisa os impactos e propaga o desvio em cascata para todas as tarefas sucessoras conectadas (respeitando finais de semana e feriados cadastrados):
+  - Se a predecessora terminou na data real `Y`, a sucessora é reprogramada para iniciar no próximo dia útil após `Y`.
+  - Se a predecessora já iniciou de forma real, mas ainda não terminou, o motor calcula o término estimado (Data de Início Real + Duração Planejada) e propaga esse desvio para os próximos passos.
+
+### 8.2 Indicadores Visuais de Origem (Date Source)
+
+Na coluna de **Início Planejado** (aba de visualização *Plan* ou *Full*), você verá pequenos ícones ao lado da data indicando sua origem:
+- **🔒 Cadeado (Locked):** Indica que a tarefa tem uma data de início inserida manualmente pelo usuário no CSV ou foi definida de forma fixa.
+- **⚡ Raio (Forecast):** Indica que a data de início é flutuante e foi recalculada dinamicamente pelo motor devido a desvios ou atrasos reais em suas predecessoras.
+
+### 8.3 Executando o Forecast
+
+Sempre que dados de execução real forem inseridos ou atualizados, o motor realiza os cálculos de forecast automaticamente. 
+Para forçar um recálculo manual a qualquer momento:
+1. Clique no botão **"🔄 Recalcular"** na barra de controle superior.
+2. Um toast flutuante no topo confirmará o resultado:
+   - *Exemplo:* `🔄 Previsão recalculada — 3 tarefa(s) com forecast atualizado`
+   - Se nenhuma tarefa tiver data flutuante impactada: `✅ Cronograma recalculado — sem impactos em cascata`
+
+### 8.4 KPI de Forecast
+
+Na barra de estatísticas (Stats Bar), quando houver tarefas afetadas por reprogramações automáticas de forecast, um card especial azul será exibido:
+- **⚡ X Forecast:** Mostra exatamente quantas tarefas do projeto estão com suas datas alteradas dinamicamente devido ao atraso de predecessoras.
+
+---
+
+## 9. Indicadores e KPIs
 
 Os KPIs aparecem automaticamente na barra de estatísticas **após salvar um baseline**.
 
-### 8.1 SPI — Schedule Performance Index
+### 9.1 SPI — Schedule Performance Index
 
 | Valor | Significado | Cor |
 |-------|-------------|-----|
@@ -265,20 +300,20 @@ Os KPIs aparecem automaticamente na barra de estatísticas **após salvar um bas
 | **0.8 - 0.99** | Leve atraso | 🟡 Amarelo |
 | **< 0.8** | Atraso significativo | 🔴 Vermelho |
 
-### 8.2 Desvio Médio
+### 9.2 Desvio Médio
 
 - Mostra a média de dias de desvio em relação ao baseline
 - **+Xd** = atraso médio (vermelho)
 - **-Xd** = adiantamento médio (verde)
 - **0d** = no prazo perfeito
 
-### 8.3 Tarefas Atrasadas
+### 9.3 Tarefas Atrasadas
 
 - Contador de tarefas cuja data de término **excede** a data prevista no baseline
 - Aparece apenas quando há pelo menos 1 tarefa atrasada
 - Exibido em vermelho para chamar atenção
 
-### 8.4 Badges por Tarefa
+### 9.4 Badges por Tarefa
 
 Na lista de tarefas, cada tarefa com baseline mostra um badge individual:
 - **`+5d`** (vermelho) — tarefa 5 dias atrasada em relação ao baseline
@@ -288,9 +323,9 @@ Tarefas atrasadas também recebem uma **borda vermelha à esquerda** na lista.
 
 ---
 
-## 9. Visualizações e Colunas
+## 10. Visualizações e Colunas
 
-### 9.1 Seletor de Visão
+### 10.1 Seletor de Visão
 
 No cabeçalho da lista de tarefas, use as abas de visão:
 
@@ -301,45 +336,45 @@ No cabeçalho da lista de tarefas, use as abas de visão:
 | **Exec** (Execução) | + Início Real, Fim Real |
 | **Full** (Completa) | Todas as colunas acima combinadas |
 
-### 9.2 Persistência
+### 10.2 Persistência
 
 A visão selecionada é salva no navegador e restaurada automaticamente na próxima sessão.
 
-### 9.3 Redimensionamento
+### 10.3 Redimensionamento
 
 - Arraste o **divisor** entre a lista de tarefas e o gráfico para ajustar proporções
 - A largura mínima se adapta automaticamente conforme a visão selecionada
 
 ---
 
-## 10. Feriados e Calendário
+## 11. Feriados e Calendário
 
-### 10.1 Adicionar Feriados
+### 11.1 Adicionar Feriados
 
 1. Clique no ícone **"🗓️ Feriados"** no cabeçalho
 2. No modal, insira a **Data** e o **Nome** do feriado
 3. Clique em **"Adicionar"**
 
-### 10.2 Efeito dos Feriados
+### 11.2 Efeito dos Feriados
 
 - Dias marcados como feriados são **excluídos** do cálculo de dias úteis
 - No gráfico, aparecem como **colunas destacadas** (similar a fins de semana)
 - A duração das tarefas "pula" automaticamente feriados e fins de semana
 
-### 10.3 Remover Feriados
+### 11.3 Remover Feriados
 
 - No modal de feriados, clique no **"🗑️"** ao lado do feriado para removê-lo
 
 ---
 
-## 11. Tema e Personalização
+## 12. Tema e Personalização
 
-### 11.1 Tema Claro/Escuro
+### 12.1 Tema Claro/Escuro
 
 - Clique no botão **"🌓"** no cabeçalho para alternar
 - A preferência é salva automaticamente
 
-### 11.2 Cores das Barras
+### 12.2 Cores das Barras
 
 As barras de tarefas alternam entre cores distintas para facilitar a leitura:
 - Cada tarefa recebe uma cor da paleta predefinida
@@ -348,9 +383,9 @@ As barras de tarefas alternam entre cores distintas para facilitar a leitura:
 
 ---
 
-## 12. Exportação
+## 13. Exportação
 
-### 12.1 Exportar como Imagem
+### 13.1 Exportar como Imagem
 
 1. Clique em **"Exportar Imagem"** no cabeçalho
 2. O sistema captura toda a área do gráfico (incluindo partes não visíveis)
@@ -360,7 +395,7 @@ As barras de tarefas alternam entre cores distintas para facilitar a leitura:
 
 ---
 
-## 13. Dúvidas Frequentes
+## 14. Dúvidas Frequentes
 
 ### O projeto não carrega — o que faço?
 
@@ -409,4 +444,4 @@ Os KPIs (SPI, Desvio Médio, Atrasadas) só aparecem **após salvar um baseline*
 
 ---
 
-*Manual gerado para ProjectGantt v2.0 — Sprint 4 (Maio 2026)*
+*Manual gerado para ProjectGantt v2.1 — Sprint 5 (Maio 2026)*
