@@ -67,9 +67,9 @@ const App = {
     });
 
     const gridTemplate = computed(() => {
-      if (columnView.value === 'padrao') return '36px minmax(60px, 1fr) 45px 45px 45px';
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(60px, 1fr) 45px 45px 45px 85px 85px';
-      return '36px minmax(60px, 1fr) 45px 45px 45px 85px 85px 85px 85px';
+      if (columnView.value === 'padrao') return '36px minmax(30px, 1fr) 45px 45px 45px';
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(30px, 1fr) 45px 45px 45px 85px 85px';
+      return '36px minmax(30px, 1fr) 45px 45px 45px 85px 85px 85px 85px';
     });
 
     const recalculateStatus = ref('');
@@ -508,6 +508,7 @@ const App = {
       taskList.forEach(t => {
         t.start = null;
         t.end = null;
+        t.dateSource = 'calculated'; // 'locked' | 'calculated' | 'forecast'
         map[t.id] = t;
       });
       const stack = new Set();
@@ -519,6 +520,7 @@ const App = {
         if (t.plannedStart && t.plannedEnd) {
           t.start = parseDate(t.plannedStart);
           t.end = parseDate(t.plannedEnd);
+          t.dateSource = 'locked';
           return;
         }
 
@@ -532,19 +534,45 @@ const App = {
             const predStrs = String(t.predecessor).match(/\d+/g) || [];
             let maxStart = new Date(projStart);
             let hasValidPred = false;
+            let usedForecast = false;
             predStrs.forEach(pStr => {
               const predId = parseInt(pStr);
               if (map[predId]) {
                 const pred = map[predId];
                 resolve(pred);
                 
-                // SS is Start-to-Start. Otherwise default FS (Finish-to-Start)
-                const candidateStart = t.type === 'SS' ? new Date(pred.start) : addWorkingDays(pred.start, pred.duration);
+                let candidateStart;
+                if (t.type === 'SS') {
+                  // Start-to-Start: use actual start if available
+                  const predActualStart = pred.realStart ? parseDate(pred.realStart) : null;
+                  candidateStart = predActualStart || new Date(pred.start);
+                  if (predActualStart) usedForecast = true;
+                } else {
+                  // Finish-to-Start (default): use actual end if available for forecast
+                  const predActualEnd = pred.realEnd ? parseDate(pred.realEnd) : null;
+                  if (predActualEnd) {
+                    // Predecessor finished: successor starts next working day after actual end
+                    candidateStart = addWorkingDays(predActualEnd, 1);
+                    usedForecast = true;
+                  } else if (pred.realStart && !pred.realEnd) {
+                    // Predecessor started but not finished: forecast based on actual start + remaining duration
+                    const predRealStart = parseDate(pred.realStart);
+                    const predForecastEnd = addWorkingDays(predRealStart, pred.duration - 1);
+                    candidateStart = addWorkingDays(predForecastEnd, 1);
+                    usedForecast = true;
+                  } else {
+                    // No actual data: use planned end
+                    candidateStart = addWorkingDays(pred.start, pred.duration);
+                  }
+                }
                 if (candidateStart > maxStart) maxStart = candidateStart;
                 hasValidPred = true;
               }
             });
             t.start = hasValidPred ? maxStart : new Date(projStart);
+            if (usedForecast && t.dateSource !== 'locked') {
+              t.dateSource = 'forecast';
+            }
           }
           stack.delete(t.id);
         }
@@ -557,6 +585,18 @@ const App = {
       };
       
       taskList.forEach(resolve);
+    };
+
+    // Sprint 5: Forecast Recalculate
+    const runForecast = () => {
+      if (!tasks.value.length) return;
+      calculateSchedule(tasks.value, projectMetadata.value.startDate);
+      buildTimeline();
+      const forecastCount = tasks.value.filter(t => t.dateSource === 'forecast').length;
+      recalculateStatus.value = forecastCount > 0
+        ? `🔄 Previsão recalculada — ${forecastCount} tarefa(s) com forecast atualizado`
+        : '✅ Cronograma recalculado — sem impactos em cascata';
+      setTimeout(() => { recalculateStatus.value = ''; }, 4000);
     };
 
     const buildTimeline = () => {
@@ -722,7 +762,8 @@ const App = {
         endDate: pMax ? formatDatePT(pMax) : '--',
         spi: spi,
         avgDeviation: deviationCount > 0 ? Math.round(totalDeviation / deviationCount * 10) / 10 : null,
-        delayedCount: delayedCount
+        delayedCount: delayedCount,
+        forecastCount: tasks.value.filter(t => t.dateSource === 'forecast').length
       };
     });
 
@@ -1116,7 +1157,7 @@ const App = {
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
       getBaselineBarLeft, getBaselineBarWidthPx, getTaskDelay, setColumnView,
-      saveBaseline, toggleBaselineBars, toggleRealBars,
+      saveBaseline, toggleBaselineBars, toggleRealBars, runForecast,
       startResize, syncScroll, toggleTheme, exportPNG, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
     };
   }
