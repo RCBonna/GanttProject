@@ -8,6 +8,7 @@ A documentação está dividida de forma modular para facilitar a consulta:
 
 ### 📖 Guias & Manuais
 * [Manual do Usuário](./MANUAL_USUARIO.md)
+* [Plano de Profissionalização](./Gantt_Professionalization_Plan.md)
 
 ### 🏗 Arquitetura & Design
 * [Design do Sistema](./architecture/system-design.md)
