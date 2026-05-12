@@ -6,6 +6,9 @@ Bem-vindo à documentação técnica oficial do **ProjectGantt**. Este diretóri
 
 A documentação está dividida de forma modular para facilitar a consulta:
 
+### 📖 Guias & Manuais
+* [Manual do Usuário](./MANUAL_USUARIO.md)
+
 ### 🏗 Arquitetura & Design
 * [Design do Sistema](./architecture/system-design.md)
 * [Frontend (Vue 3 UI/UX)](./frontend/ui-ux.md)
