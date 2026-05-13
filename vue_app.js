@@ -40,10 +40,40 @@ function parseDate(s) {
 // Safer local date format YYYY-MM-DD
 function getLocalISOString(d) {
   if (!d) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  if (typeof d === 'string') {
+    const s = d.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      return s.substring(0, 10);
+    }
+    const brMatch = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (brMatch) {
+      return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+    }
+  }
+  let dateObj = typeof d === 'string' ? new Date(d) : d;
+  if (isNaN(dateObj)) return '';
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function toInputDateFormat(val) {
+  if (!val) return '';
+  const str = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const brMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  }
+  const d = parseDate(str);
+  if (d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return '';
 }
 
 // IndexedDB Directory Handle Persistence
@@ -119,22 +149,22 @@ const App = {
     
     // Column Visibility View Mode & Width Persistency with responsive minimum bounds
     const columnView = ref(localStorage.getItem('columnView') || 'planejamento');
-    const taskListWidth = ref(parseInt(localStorage.getItem('taskListWidth')) || 450);
+    const minTaskListWidth = computed(() => {
+      if (columnView.value === 'padrao') return 295;
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return 465;
+      return 635;
+    });
+
+    const taskListWidth = ref(Math.max(parseInt(localStorage.getItem('taskListWidth')) || 495, minTaskListWidth.value));
 
     // Baseline & Real bar visibility toggles
     const showBaselineBars = ref(localStorage.getItem('showBaselineBars') !== 'false');
     const showRealBars = ref(localStorage.getItem('showRealBars') !== 'false');
-    
-    const minTaskListWidth = computed(() => {
-      if (columnView.value === 'padrao') return 250;
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return 420;
-      return 590;
-    });
 
     const gridTemplate = computed(() => {
-      if (columnView.value === 'padrao') return '36px minmax(30px, 1fr) 45px 45px 45px';
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(30px, 1fr) 45px 45px 45px 85px 85px';
-      return '36px minmax(30px, 1fr) 45px 45px 45px 85px 85px 85px 85px';
+      if (columnView.value === 'padrao') return '36px minmax(30px, 1fr) 45px 45px 45px 45px';
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px';
+      return '36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px 85px 85px';
     });
 
     const recalculateStatus = ref('');
@@ -943,7 +973,6 @@ const App = {
       return Math.max(18, e - s - 4);
     };
     const getBarColor = (t, i) => {
-      if (t.percent >= 100) return 'var(--success)';
       return BAR_COLORS[i % BAR_COLORS.length];
     };
 
@@ -1133,6 +1162,10 @@ const App = {
     const openEditModal = (task) => {
       // Create a clean deep copy
       editingTask.value = JSON.parse(JSON.stringify(task));
+      editingTask.value.plannedStart = toInputDateFormat(editingTask.value.plannedStart);
+      editingTask.value.plannedEnd = toInputDateFormat(editingTask.value.plannedEnd);
+      editingTask.value.realStart = toInputDateFormat(editingTask.value.realStart);
+      editingTask.value.realEnd = toInputDateFormat(editingTask.value.realEnd);
       hasPlannedDates.value = !!(editingTask.value.plannedStart && editingTask.value.plannedEnd);
       showEditModal.value = true;
     };

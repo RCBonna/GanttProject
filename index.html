@@ -23,7 +23,7 @@
   --text:#212529;--text2:#495057;--text3:#adb5bd;
   --success:#20bf6b;--warn:#f7b731;--border:#dee2e6;
 }
-body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:auto}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
 
 /* HEADER */
 .header{
@@ -196,20 +196,20 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 /* BASELINE BAR (Ghost bar below planned) */
 .baseline-bar {
   position: absolute;
-  top: 2px;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(150, 150, 170, 0.2);
-  border: 1px dashed rgba(150, 150, 170, 0.35);
+  top: 1px;
+  height: 4px;
+  border-radius: 2px;
+  background: #a4b0be;
+  border: 1px solid #747d8c;
   z-index: 1;
   cursor: pointer;
   transition: all 0.2s;
 }
 .baseline-bar:hover {
-  height: 8px;
-  top: 1px;
-  background: rgba(150, 150, 170, 0.35);
-  box-shadow: 0 0 6px rgba(150, 150, 170, 0.3);
+  height: 6px;
+  top: 0px;
+  background: #dfe4ea;
+  box-shadow: 0 0 8px rgba(223, 228, 234, 0.6);
 }
 
 /* Delay indicator on task rows */
@@ -425,12 +425,28 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 @keyframes milestonePopIn{from{transform:rotate(45deg) scale(0);opacity:0}to{transform:rotate(45deg) scale(1);opacity:1}}
 
 /* HELP MODAL & EDIT MODALS */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(6px);animation:fadeIn 0.2s ease forwards}
-.modal{
-  background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);
-  border:1px solid var(--border);border-radius:16px;padding:24px;
-  box-shadow:0 20px 50px rgba(0,0,0,.6);
-  animation:scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.75);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(6px);
+  animation: fadeIn 0.2s ease forwards;
+  padding: 20px;
+}
+.modal {
+  background: linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.6);
+  animation: scaleIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 @keyframes scaleIn {
   from { transform: scale(0.92); opacity: 0; }
@@ -504,6 +520,36 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .modal-input:focus {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 2px rgba(108, 92, 231, 0.2);
+}
+input[type="range"].modal-input {
+  padding: 0 !important;
+  height: 20px !important;
+  background: transparent !important;
+  border: none !important;
+  accent-color: var(--accent) !important;
+}
+.percent-pill {
+  flex: 1;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 4px 0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.percent-pill:hover {
+  background: var(--surface2);
+  color: var(--text);
+  border-color: var(--accent2);
+}
+.percent-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .modal-grid-2 {
   display: grid;
@@ -733,7 +779,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
     <!-- Task List -->
     <div class="task-list" :style="{ width: taskListWidth + 'px' }" id="taskList">
       <div class="tl-header" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
-        <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span>
+        <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span><span>Tipo</span>
         <template v-if="columnView === 'planejamento' || columnView === 'completa'">
           <span style="font-size:8px">Início Plan.</span><span style="font-size:8px">Fim Plan.</span>
         </template>
@@ -749,13 +795,15 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
           <span v-else-if="getTaskDelay(t) < 0" class="delay-badge ahead-badge">{{ getTaskDelay(t) }}d</span>
         </span>
         <span>{{ t.duration===0?'-':t.percent+'%' }}</span>
-        <span style="color:var(--accent2)">{{ t.duration }}d</span>
+        <span style="color:var(--accent2)">{{ t.duration }}</span>
         <span>{{ t.predecessor || '-' }}</span>
+        <span>{{ t.predecessor ? (t.type || 'FS') : '-' }}</span>
         <template v-if="columnView === 'planejamento' || columnView === 'completa'">
           <span style="font-size:10px; color:var(--text2); display:flex; align-items:center;">
             <span v-if="t.dateSource === 'locked'" class="date-source-icon locked" title="Data fixada manualmente">🔒</span>
             <span v-else-if="t.dateSource === 'forecast'" class="date-source-icon forecast" title="Data prevista via forecast">⚡</span>
-            {{ t.start ? formatDatePT(t.start) : '--' }}
+            <span v-else class="date-source-icon" style="background:transparent; color:transparent; pointer-events:none;"></span>
+            <span>{{ t.start ? formatDatePT(t.start) : '--' }}</span>
           </span>
           <span style="font-size:10px; color:var(--text2)">{{ t.end ? formatDatePT(t.end) : '--' }}</span>
         </template>
@@ -1029,6 +1077,13 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
             <div style="display:flex; align-items:center; gap:8px; height:36px;">
               <input type="range" v-model.number="editingTask.percent" min="0" max="100" class="modal-input" style="flex:1; padding:0; cursor:pointer;" @input="onProgressChange" />
               <input type="number" v-model.number="editingTask.percent" min="0" max="100" class="modal-input" style="width:65px; height:34px; padding:4px 6px; text-align:center;" @input="onProgressChange" />
+            </div>
+            <div style="display:flex; gap:6px; margin-top:4px;">
+              <button class="percent-pill" :class="{ active: editingTask.percent === 0 }" @click="editingTask.percent = 0; onProgressChange()">0%</button>
+              <button class="percent-pill" :class="{ active: editingTask.percent === 25 }" @click="editingTask.percent = 25; onProgressChange()">25%</button>
+              <button class="percent-pill" :class="{ active: editingTask.percent === 50 }" @click="editingTask.percent = 50; onProgressChange()">50%</button>
+              <button class="percent-pill" :class="{ active: editingTask.percent === 75 }" @click="editingTask.percent = 75; onProgressChange()">75%</button>
+              <button class="percent-pill" :class="{ active: editingTask.percent === 100 }" @click="editingTask.percent = 100; onProgressChange()">100%</button>
             </div>
           </div>
         </div>
