@@ -150,21 +150,35 @@ const App = {
     // Column Visibility View Mode & Width Persistency with responsive minimum bounds
     const columnView = ref(localStorage.getItem('columnView') || 'planejamento');
     const minTaskListWidth = computed(() => {
-      if (columnView.value === 'padrao') return 295;
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return 465;
-      return 635;
+      if (columnView.value === 'padrao') return 325;
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return 495;
+      return 665;
     });
 
-    const taskListWidth = ref(Math.max(parseInt(localStorage.getItem('taskListWidth')) || 495, minTaskListWidth.value));
+    const taskListWidth = ref(Math.max(parseInt(localStorage.getItem('taskListWidth')) || 525, minTaskListWidth.value));
 
     // Baseline & Real bar visibility toggles
     const showBaselineBars = ref(localStorage.getItem('showBaselineBars') !== 'false');
     const showRealBars = ref(localStorage.getItem('showRealBars') !== 'false');
 
     const gridTemplate = computed(() => {
-      if (columnView.value === 'padrao') return '36px minmax(30px, 1fr) 45px 45px 45px 45px';
-      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px';
-      return '36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px 85px 85px';
+      if (columnView.value === 'padrao') return '30px 36px minmax(30px, 1fr) 45px 45px 45px 45px';
+      if (columnView.value === 'planejamento' || columnView.value === 'execucao') return '30px 36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px';
+      return '30px 36px minmax(30px, 1fr) 45px 45px 45px 45px 85px 85px 85px 85px';
+    });
+
+    const selectAllBaseline = computed({
+      get: () => {
+        const unclosed = tasks.value.filter(t => t.percent < 100);
+        return unclosed.length > 0 && unclosed.every(t => t.selectedForBaseline);
+      },
+      set: (val) => {
+        tasks.value.forEach(t => {
+          if (t.percent < 100) {
+            t.selectedForBaseline = val;
+          }
+        });
+      }
     });
 
     const recalculateStatus = ref('');
@@ -175,6 +189,7 @@ const App = {
     const showProjectSettingsModal = ref(false);
     const showHolidaysModal = ref(false);
     const showEditModal = ref(false);
+    const showExportModal = ref(false);
 
     // Temp variables for modals
     const editingTask = ref(null);
@@ -404,21 +419,26 @@ const App = {
       await saveFileToDisk(projectMetadata.value.tasksFile, csvContent);
     };
 
-    // Baseline Snapshot — copies current calculated start/end to baseline fields
+    // Baseline Snapshot — copies current calculated start/end to baseline fields for selected unclosed tasks
     const saveBaseline = async () => {
       if (!tasks.value.length) return;
-      const today = getLocalISOString(new Date());
-      const hasExisting = tasks.value.some(t => t.baselineStart || t.baselineEnd);
-      if (hasExisting) {
-        if (!await showCustomConfirm('Já existe uma linha de base salva. Deseja sobrescrever com o planejamento atual?', 'Sobrescrever Baseline', 'warn')) return;
+      const selectedTasks = tasks.value.filter(t => t.percent < 100 && t.selectedForBaseline);
+      if (!selectedTasks.length) {
+        addToast('⚠️ Selecione pelo menos uma tarefa não concluída para salvar a Linha de Base.', 'warn');
+        return;
       }
-      tasks.value.forEach(t => {
+      const today = getLocalISOString(new Date());
+      const hasExisting = selectedTasks.some(t => t.baselineStart || t.baselineEnd);
+      if (hasExisting) {
+        if (!await showCustomConfirm('Algumas das tarefas selecionadas já possuem linha de base. Deseja sobrescrever?', 'Sobrescrever Baseline', 'warn')) return;
+      }
+      selectedTasks.forEach(t => {
         t.baselineStart = t.start ? getLocalISOString(t.start) : '';
         t.baselineEnd = t.end ? getLocalISOString(t.end) : '';
         t.baselineDate = today;
       });
       await saveTasksToDisk();
-      addToast('📸 Linha de Base (Baseline) salva com sucesso!', 'success');
+      addToast(`📸 Linha de Base (Baseline) salva para ${selectedTasks.length} tarefa(s) selecionada(s)!`, 'success');
     };
 
     // Project Metadata Config modal saver
@@ -622,7 +642,8 @@ const App = {
             baselineEnd: baselineEnd || '',
             baselineDate: baselineDate || '',
             start: null,
-            end: null
+            end: null,
+            selectedForBaseline: isNaN(taskPercent) || taskPercent < 100
           };
         });
         calculateSchedule(mappedTasks, projectMetadata.value.startDate);
@@ -1108,7 +1129,179 @@ const App = {
         link.download = `Gantt_${name}.png`;
         link.href = canvas.toDataURL('image/png');
         link.click();
+        addToast('success', 'Imagem HD (PNG) exportada com sucesso!');
       });
+    };
+
+    const exportPDF = () => {
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        addToast('error', 'Biblioteca jsPDF não encontrada no sistema.');
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      
+      // Cores do tema
+      const primaryColor = [52, 31, 151]; // #341f97
+      const textColor = [45, 55, 72];
+      const grayColor = [113, 128, 150];
+
+      // Faixa de cabeçalho
+      doc.setFillColor(...primaryColor);
+      doc.rect(0, 0, 210, 36, 'F');
+
+      // Título
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.text(projectMetadata.value.name || 'Projeto Gantt', 14, 20);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.text(`Relatório Executivo Gerencial • Gerado em: ${new Date().toLocaleDateString('pt-BR')}`, 14, 28);
+
+      // Metadados do Projeto (Caixa cinza suave)
+      doc.setFillColor(247, 250, 252);
+      doc.rect(14, 42, 182, 32, 'F');
+
+      doc.setTextColor(...textColor);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text("Resumo Executivo do Projeto", 20, 50);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text(`Gerente de Projeto: ${projectMetadata.value.manager || 'Não informado'}`, 20, 58);
+      doc.text(`Data Base de Início: ${formatDatePT(projectMetadata.value.startDate)}`, 110, 58);
+
+      // Indicadores
+      doc.text(`Progresso Geral: ${stats.value.progress}% concluído`, 20, 66);
+      doc.text(`Previsão de Término: ${stats.value.endDate}`, 110, 66);
+
+      // KPIs (SPI e Atrasos)
+      const spiText = stats.value.spi !== null ? String(stats.value.spi) : '1.0';
+      const devText = stats.value.avgDeviation !== null ? `${stats.value.avgDeviation} dias` : '0 dias';
+      doc.text(`SPI (Índice de Prazo): ${spiText}`, 20, 74);
+      doc.text(`Desvio Médio: ${devText} | Atrasadas: ${stats.value.delayedCount}`, 110, 74);
+
+      // Tabela de Tarefas
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(...primaryColor);
+      doc.text("Detalhamento de Atividades e Acompanhamento", 14, 86);
+
+      // Cabeçalho da Tabela
+      doc.setFillColor(226, 232, 240);
+      doc.rect(14, 90, 182, 10, 'F');
+      doc.setFontSize(10);
+      doc.setTextColor(...textColor);
+      doc.text("ID", 18, 97);
+      doc.text("Atividade", 32, 97);
+      doc.text("Progresso", 125, 97);
+      doc.text("Fim Previsto", 155, 97);
+      doc.text("Status", 185, 97);
+
+      // Linhas da Tabela
+      doc.setFont('helvetica', 'normal');
+      let startY = 106;
+      tasks.value.forEach((t, index) => {
+        if (startY > 270) {
+          doc.addPage();
+          startY = 20;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.setFillColor(226, 232, 240);
+          doc.rect(14, startY, 182, 10, 'F');
+          doc.text("ID", 18, startY + 7);
+          doc.text("Atividade", 32, startY + 7);
+          doc.text("Progresso", 125, startY + 7);
+          doc.text("Fim Previsto", 155, startY + 7);
+          doc.text("Status", 185, startY + 7);
+          doc.setFont('helvetica', 'normal');
+          startY += 16;
+        }
+
+        // Zebra striping
+        if (index % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(14, startY - 5, 182, 9, 'F');
+        }
+
+        doc.text(String(t.id), 18, startY);
+        const shortName = t.task.length > 40 ? t.task.substring(0, 38) + '...' : t.task;
+        doc.text(shortName, 32, startY);
+        doc.text(`${t.percent}%`, 125, startY);
+        doc.text(t.end ? formatDatePT(t.end) : '--', 155, startY);
+
+        const delay = getTaskDelay(t);
+        let statusStr = "Normal";
+        if (t.percent === 100) statusStr = "Concluído";
+        else if (delay > 0) statusStr = `+${delay} dias`;
+        else if (t.dateSource === 'forecast') statusStr = "Forecast";
+
+        if (statusStr === "Concluído") doc.setTextColor(40, 167, 69);
+        else if (delay > 0) doc.setTextColor(220, 53, 69);
+        else if (statusStr === "Forecast") doc.setTextColor(253, 126, 20);
+        else doc.setTextColor(...grayColor);
+
+        doc.text(statusStr, 185, startY);
+        doc.setTextColor(...textColor); // reset
+
+        startY += 9;
+      });
+
+      // Rodapé
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(...grayColor);
+        doc.text(`Ordo Domus / ProjectGantt • Página ${i} de ${pageCount}`, 14, 287);
+      }
+
+      const cleanName = projectMetadata.value.name.replace(/\s+/g, '_');
+      doc.save(`Relatorio_Executivo_${cleanName}.pdf`);
+      addToast('success', 'Relatório Executivo PDF exportado com sucesso!');
+    };
+
+    const exportCSVReport = () => {
+      if (!tasks.value.length) {
+        addToast('warn', 'Não há tarefas para exportar.');
+        return;
+      }
+      
+      const headers = ['ID', 'Atividade', 'Progresso (%)', 'Início Previsto', 'Fim Previsto', 'Duração (Dias)', 'Atraso (Dias)', 'Status Previsão', 'Responsável'];
+      const rows = tasks.value.map(t => {
+        const delay = getTaskDelay(t);
+        let statusStr = 'Normal';
+        if (t.percent === 100) statusStr = 'Concluído';
+        else if (delay > 0) statusStr = `Atrasado em ${delay} dias`;
+        else if (t.dateSource === 'forecast') statusStr = 'Forecast (Re-calculado)';
+
+        return [
+          t.id,
+          `"${t.task.replace(/"/g, '""')}"`,
+          t.percent,
+          t.start ? formatDatePT(t.start) : '',
+          t.end ? formatDatePT(t.end) : '',
+          t.duration,
+          delay,
+          statusStr,
+          `"${t.owner ? t.owner.replace(/"/g, '""') : ''}"`
+        ].join(',');
+      });
+
+      const csvContent = "\uFEFF" + [headers.join(','), ...rows].join('\n'); // BOM para acentos no Excel
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      const cleanName = projectMetadata.value.name.replace(/\s+/g, '_');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Daily_Status_Report_${cleanName}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      addToast('success', 'Daily Status Report (CSV) exportado para Excel com sucesso!');
     };
 
     // Detailed Premium Tooltips — supports 'planned', 'real', 'baseline'
@@ -1255,7 +1448,8 @@ const App = {
         baselineEnd: '',
         baselineDate: '',
         start: null,
-        end: null
+        end: null,
+        selectedForBaseline: true
       };
       tasks.value.push(newTask);
       calculateSchedule(tasks.value, projectMetadata.value.startDate);
@@ -1297,7 +1491,8 @@ const App = {
             tasks.value = rawCachedTasks.map(t => ({
               ...t,
               start: t.start ? new Date(t.start) : null,
-              end: t.end ? new Date(t.end) : null
+              end: t.end ? new Date(t.end) : null,
+              selectedForBaseline: t.percent < 100
             }));
             calculateSchedule(tasks.value, projectMetadata.value.startDate);
             buildTimeline();
@@ -1332,13 +1527,13 @@ const App = {
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
       stats, donutBg, recalculateStatus,
       showBaselineBars, showRealBars, hasAnyBaseline,
-      columnView, gridTemplate, minTaskListWidth,
+      columnView, gridTemplate, minTaskListWidth, selectAllBaseline,
       
       // Custom Dialogs and Toasts
       toasts, customDialog, addToast, removeToast, showCustomAlert, showCustomConfirm,
 
       // Modals Control
-      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal,
+      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal,
       editingTask, hasPlannedDates, projectOptions, tempProjectMetadata,
       newHolidayDate, newHolidayName, sortedHolidays, tooltip,
 
@@ -1349,7 +1544,7 @@ const App = {
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
       getBaselineBarLeft, getBaselineBarWidthPx, getTaskDelay, setColumnView,
       saveBaseline, toggleBaselineBars, toggleRealBars, runForecast,
-      startResize, syncScroll, toggleTheme, exportPNG, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
+      startResize, syncScroll, toggleTheme, exportPNG, exportPDF, exportCSVReport, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
     };
   }
 };

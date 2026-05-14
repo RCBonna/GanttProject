@@ -67,26 +67,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
 .btn-zoom.active{background:var(--accent); color:#fff}
 .btn-zoom:hover:not(.active){background:rgba(255,255,255,0.05)}
 
-/* EXPORT CARD */
-.export-card {
-  background: var(--surface3);
-  border: 2px solid var(--border);
-  border-radius: 14px;
-  padding: 22px;
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-}
-.export-card:hover {
-  transform: translateY(-5px);
-  border-color: var(--accent);
-  box-shadow: 0 10px 25px rgba(108, 92, 231, 0.2);
-}
-
 /* STATS BAR */
 .stats-bar{display:flex;gap:20px;padding:10px 30px;border-bottom:1px solid var(--border);background:var(--surface)}
 .stat{display:flex;align-items:center;gap:8px}
@@ -142,6 +122,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   position:sticky;top:0;z-index:11;
 }
 .tl-header span:nth-child(n+4){text-align:right; padding-right:5px}
+.tl-header span:nth-child(3){text-align:left;}
 .tl-row{
   padding:0 10px;height:var(--row-h);align-items:center;
   border-bottom:1px solid var(--border);font-size:12px;
@@ -149,7 +130,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   transition: background 0.15s;
 }
 .tl-row span:nth-child(n+4){text-align:right; padding-right:5px}
-.tl-row .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px; text-align: left !important;}
+.tl-row span:nth-child(3), .tl-row .name{text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:8px}
 .tl-row.is-milestone{color:var(--warn); font-weight:600}
 .tl-row.is-milestone .name{color:var(--warn)}
 
@@ -318,6 +299,45 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-h
   color: var(--text2);
   text-transform: uppercase;
   letter-spacing: 0.3px;
+}
+
+/* PREMIUM TASK CHECKBOX */
+.task-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--text3);
+  border-radius: 4px;
+  background: var(--surface3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  margin-left: 6px;
+}
+.task-checkbox:hover {
+  border-color: var(--accent);
+  background: var(--surface2);
+  transform: scale(1.05);
+}
+.task-checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.task-checkbox:checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
+.task-checkbox:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* Column view selector tabs */
@@ -657,6 +677,77 @@ input[type="range"].modal-input {
 .custom-dialog.success { border-top-color: var(--success); }
 .custom-dialog.error { border-top-color: #ff4757; }
 .custom-dialog.warn { border-top-color: var(--warn); }
+
+/* SPRINT 8: FILTER BAR & DASHBOARD MODAL */
+.filter-bar {
+  background: linear-gradient(135deg, rgba(26, 29, 39, 0.7) 0%, rgba(36, 40, 54, 0.7) 100%);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 30px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+}
+.filter-input {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.filter-input:focus {
+  border-color: var(--accent);
+}
+.badge-count {
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+}
+.dash-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dash-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.progress-track {
+  background: var(--surface3);
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  width: 100%;
+}
+.progress-fill {
+  height: 100%;
+  transition: width 0.5s ease;
+}
 </style>
 </head>
 <body>
@@ -706,8 +797,11 @@ input[type="range"].modal-input {
       </div>
       
       <button class="btn-theme" @click="toggleTheme" title="Alternar entre tema Claro e Escuro">🌓</button>
-      <button class="btn" @click="showExportModal = true" v-if="hasFolder" style="background: linear-gradient(135deg, #341f97, var(--accent))" title="Exportar Cronograma e Relatórios">
-        📥 Exportar...
+      <button class="btn" @click="exportPNG" v-if="hasFolder" style="background: linear-gradient(135deg, #341f97, var(--accent))">Exportar Imagem</button>
+      
+      <!-- Relatórios e Dashboard Avançado -->
+      <button class="btn" @click="showDashboardModal = true" v-if="hasFolder && tasks.length > 0" style="background: linear-gradient(135deg, #e84393, #fd79a8)" title="Abrir painel de relatórios avançados e exportação PDF/CSV">
+        📊 Relatórios & Dashboard
       </button>
     </div>
   </div>
@@ -771,6 +865,36 @@ input[type="range"].modal-input {
     </div>
   </div>
 
+  <!-- Barra de Filtros Avançados (Sprint 8) -->
+  <div class="filter-bar" v-if="hasFolder && tasks.length > 0">
+    <div class="filter-group">
+      <span class="filter-label">🔍 Buscar:</span>
+      <input type="text" v-model="searchQuery" class="filter-input" placeholder="Nome ou ID da tarefa..." style="width: 180px;" />
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">🏷️ Status:</span>
+      <select v-model="filterStatus" class="filter-input" style="cursor: pointer;">
+        <option value="all">Todas as Tarefas</option>
+        <option value="completed">Concluídas (100%)</option>
+        <option value="in_progress">Em Andamento (1-99%)</option>
+        <option value="not_started">Não Iniciadas (0%)</option>
+        <option value="delayed">Atrasadas</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">🔗 Depende de (ID):</span>
+      <input type="text" v-model="filterPred" class="filter-input" placeholder="ID da Predecessora..." style="width: 120px;" />
+    </div>
+    <div class="filter-group" v-if="searchQuery || filterStatus !== 'all' || filterPred">
+      <button class="btn-secondary" @click="searchQuery = ''; filterStatus = 'all'; filterPred = ''" style="height: 30px; padding: 0 10px; font-size: 11px;">
+        Limpar Filtros
+      </button>
+    </div>
+    <div style="margin-left: auto; font-size: 12px; color: var(--text2);">
+      Exibindo <span class="badge-count">{{ filteredTasks.length }}</span> de {{ tasks.length }} tarefas
+    </div>
+  </div>
+
   <!-- Forecast Status Toast -->
   <div v-if="recalculateStatus" class="forecast-toast" style="margin: 0 30px; padding: 8px 16px;">
     {{ recalculateStatus }}
@@ -802,8 +926,10 @@ input[type="range"].modal-input {
     <!-- Task List -->
     <div class="task-list" :style="{ width: taskListWidth + 'px' }" id="taskList">
       <div class="tl-header" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
-        <div style="display:flex; justify-content:center;"><input type="checkbox" v-model="selectAllBaseline" title="Selecionar/deselecionar todas as tarefas abertas para Baseline" style="cursor: pointer; accent-color: var(--accent);" /></div>
-        <span>#</span><span style="text-align: left !important; padding-left: 0;">Tarefa</span><span>%</span><span>Dias</span><span>Pred</span><span>Tipo</span>
+        <div style="display:flex; align-items:center;">
+          <input type="checkbox" class="task-checkbox" v-model="selectAllBaseline" title="Selecionar/deselecionar todas as tarefas não concluídas para Baseline" />
+        </div>
+        <span>#</span><span>Tarefa</span><span>%</span><span>Dias</span><span>Pred</span><span>Tipo</span>
         <template v-if="columnView === 'planejamento' || columnView === 'completa'">
           <span style="font-size:8px">Início Plan.</span><span style="font-size:8px">Fim Plan.</span>
         </template>
@@ -811,13 +937,13 @@ input[type="range"].modal-input {
           <span style="font-size:8px">Início Real</span><span style="font-size:8px">Fim Real</span>
         </template>
       </div>
-      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
-        <div style="display:flex; justify-content:center; align-items:center;" @click.stop>
-          <input v-if="t.percent < 100" type="checkbox" v-model="t.selectedForBaseline" title="Selecionar para salvar Baseline" style="cursor: pointer; accent-color: var(--accent);" />
-          <span v-else title="Atividade 100% concluída" style="color: var(--success); font-weight: 900; font-size: 14px; line-height: 1; text-shadow: 0 0 6px rgba(0, 206, 201, 0.4);">✓</span>
+      <div v-for="t in filteredTasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
+        <div style="display:flex; align-items:center;" @dblclick.stop>
+          <input v-if="t.percent < 100" type="checkbox" class="task-checkbox" v-model="t.selectedForBaseline" :title="'Selecionar tarefa #' + t.id + ' para Baseline'" />
+          <span v-else style="font-size:10px; color:var(--success); margin-left:8px;" title="Tarefa já concluída (100%)">✓</span>
         </div>
         <span>{{ t.id }}</span>
-        <span class="name" style="text-align: left !important; padding-left: 0;" :title="t.task">
+        <span class="name" :title="t.task">
           {{ t.task }}
           <span v-if="getTaskDelay(t) > 0" class="delay-badge">+{{ getTaskDelay(t) }}d</span>
           <span v-else-if="getTaskDelay(t) < 0" class="delay-badge ahead-badge">{{ getTaskDelay(t) }}d</span>
@@ -857,7 +983,7 @@ input[type="range"].modal-input {
       </div>
       
       <div style="position:relative">
-        <div v-for="(t, i) in tasks" :key="t.id" :class="['ch-row', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
+        <div v-for="(t, i) in filteredTasks" :key="t.id" :class="['ch-row', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
            <div v-for="c in chartColumns" :key="c.id" :class="['ch-cell', c.isWeekend?'weekend':'', c.isHoliday?'holiday':'']" :title="c.holidayName" :style="{minWidth: colWidth+'px', maxWidth: colWidth+'px'}"></div>
            
            <!-- Marco (Milestone) -->
@@ -891,7 +1017,7 @@ input[type="range"].modal-input {
         </svg>
 
         <!-- Today Line -->
-        <div v-if="todayX >= 0" class="today-line" :style="{left: todayX+'px', height: (tasks.length * 34) + 'px'}">
+        <div v-if="todayX >= 0" class="today-line" :style="{left: todayX+'px', height: (filteredTasks.length * 34) + 'px'}">
            <div class="today-label">HOJE</div>
         </div>
       </div>
@@ -1191,55 +1317,103 @@ input[type="range"].modal-input {
     </div>
   </div>
 
-  <!-- Modal de Exportação e Relatórios -->
-  <div class="modal-overlay" :style="{ display: showExportModal ? 'flex' : 'none' }" @click.self="showExportModal = false">
-    <div class="modal" style="max-width: 680px; width: 95%;">
-      <h3 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <span>📥 Central de Exportação e Relatórios</span>
-        <button class="btn-remove" @click="showExportModal = false" style="font-size: 18px; padding: 4px 8px;">✕</button>
-      </h3>
+<!-- Baseline Toast -->
+  <div v-if="recalculateStatus" class="baseline-toast">{{ recalculateStatus }}</div>
 
-      <p style="color: var(--text-muted); margin-bottom: 24px;">
-        Selecione o formato desejado para exportar o status atual do projeto, cronograma visual ou resumo executivo para reuniões de alinhamento.
-      </p>
+  <!-- Modal: Relatórios e Dashboard Avançado (Sprint 8) -->
+  <div v-if="showDashboardModal" class="modal-overlay" @click.self="showDashboardModal = false">
+    <div class="modal" style="max-width: 800px; width: 95%;">
+      <div class="modal-header">
+        <h2 style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size: 24px;">📊</span>
+          <span>Dashboard & Relatórios Avançados</span>
+        </h2>
+        <button class="btn-remove" @click="showDashboardModal = false">✕</button>
+      </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; margin-bottom: 28px;">
-        <!-- Card PNG -->
-        <div class="export-card" @click="exportPNG(); showExportModal = false;">
-          <div style="font-size: 38px; margin-bottom: 14px;">🖼️</div>
-          <h3 style="margin: 0 0 8px 0; font-size: 16px; color: var(--text);">Imagem HD (PNG)</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4;">
-            Captura de tela visual completa do gráfico Gantt e indicadores em alta fidelidade.
-          </p>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 20px;">
+        <!-- Resumo Executivo e KPIs Globais -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
+          <div class="dash-card" style="border-top: 4px solid var(--accent);">
+            <div class="dash-card-title">Índice SPI</div>
+            <div style="font-size: 28px; font-weight: 800; color: var(--accent);">
+              {{ stats.spi !== null ? stats.spi : 'N/A' }}
+            </div>
+            <div style="font-size: 11px; color: var(--text2);">
+              {{ stats.spi >= 1 ? 'Planejamento dentro da meta ou adiantado' : stats.spi >= 0.8 ? 'Atenção ao ritmo do projeto' : 'Atraso crítico em relação à linha de base' }}
+            </div>
+          </div>
+          <div class="dash-card" style="border-top: 4px solid #fdcb6e;">
+            <div class="dash-card-title">Desvio Médio</div>
+            <div style="font-size: 28px; font-weight: 800; color: #fdcb6e;">
+              {{ stats.avgDeviation !== null ? stats.avgDeviation + ' dias' : '0 dias' }}
+            </div>
+            <div style="font-size: 11px; color: var(--text2);">Variação média de entrega das tarefas</div>
+          </div>
+          <div class="dash-card" style="border-top: 4px solid var(--success);">
+            <div class="dash-card-title">Progresso Geral</div>
+            <div style="font-size: 28px; font-weight: 800; color: var(--success);">{{ stats.progress }}%</div>
+            <div class="progress-track">
+              <div class="progress-fill" :style="{ width: stats.progress + '%', background: 'var(--success)' }"></div>
+            </div>
+          </div>
         </div>
 
-        <!-- Card PDF -->
-        <div class="export-card" @click="exportPDF(); showExportModal = false;">
-          <div style="font-size: 38px; margin-bottom: 14px;">📄</div>
-          <h3 style="margin: 0 0 8px 0; font-size: 16px; color: var(--text);">Relatório Executivo (PDF)</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4;">
-            Documento formal para diretoria com resumo gerencial, SPI, desvios e tabela do projeto.
-          </p>
+        <!-- Distribuição do Status das Tarefas -->
+        <div class="dash-card">
+          <div class="dash-card-title">📈 Distribuição do Status das Tarefas</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 5px;">
+            <div style="background: rgba(0, 206, 201, 0.1); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid rgba(0, 206, 201, 0.2);">
+              <div style="font-size: 20px; font-weight: bold; color: var(--success);">
+                {{ tasks.filter(t => t.percent === 100).length }}
+              </div>
+              <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">Concluídas</div>
+            </div>
+            <div style="background: rgba(108, 92, 231, 0.1); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid rgba(108, 92, 231, 0.2);">
+              <div style="font-size: 20px; font-weight: bold; color: var(--accent2);">
+                {{ tasks.filter(t => t.percent > 0 && t.percent < 100).length }}
+              </div>
+              <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">Em Andamento</div>
+            </div>
+            <div style="background: rgba(99, 107, 120, 0.1); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid rgba(99, 107, 120, 0.2);">
+              <div style="font-size: 20px; font-weight: bold; color: var(--text3);">
+                {{ tasks.filter(t => t.percent === 0).length }}
+              </div>
+              <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">Não Iniciadas</div>
+            </div>
+            <div style="background: rgba(255, 71, 87, 0.1); padding: 12px; border-radius: 8px; text-align: center; border: 1px solid rgba(255, 71, 87, 0.2);">
+              <div style="font-size: 20px; font-weight: bold; color: #ff4757;">
+                {{ stats.delayedCount }}
+              </div>
+              <div style="font-size: 11px; color: var(--text2); margin-top: 4px;">Atrasadas</div>
+            </div>
+          </div>
         </div>
 
-        <!-- Card CSV Daily Status Report -->
-        <div class="export-card" @click="exportCSVReport(); showExportModal = false;">
-          <div style="font-size: 38px; margin-bottom: 14px;">📊</div>
-          <h3 style="margin: 0 0 8px 0; font-size: 16px; color: var(--text);">Daily Status (Excel/CSV)</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4;">
-            Planilha de acompanhamento diário com foco em tarefas críticas, atrasos e previsão (Forecast).
+        <!-- Ações de Exportação Premium -->
+        <div class="dash-card">
+          <div class="dash-card-title">📥 Exportação e Relatórios Avançados</div>
+          <p style="font-size: 12px; color: var(--text2);">
+            Gere relatórios executivos prontos para impressão ou exporte os desvios calculados para análise em planilhas e auditorias.
           </p>
+          <div style="display: flex; gap: 15px; margin-top: 10px; flex-wrap: wrap;">
+            <button class="btn" @click="exportPDF" style="background: linear-gradient(135deg, #e84393, #fd79a8); display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; min-width: 200px;">
+              <span style="font-size: 18px;">📄</span>
+              <span>Baixar Relatório Executivo (PDF)</span>
+            </button>
+            <button class="btn" @click="exportDeviationCSV" style="background: linear-gradient(135deg, #00b894, #55efc4); display: flex; align-items: center; gap: 8px; flex: 1; justify-content: center; min-width: 200px; color: #000;">
+              <span style="font-size: 18px;">📊</span>
+              <span>Baixar Relatório de Desvios (CSV)</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      <div class="modal-footer" style="display: flex; justify-content: flex-end;">
-        <button class="btn-secondary" @click="showExportModal = false">Fechar</button>
+      <div class="modal-footer" style="margin-top: 20px; display: flex; justify-content: flex-end;">
+        <button class="btn-secondary" @click="showDashboardModal = false">Fechar</button>
       </div>
     </div>
   </div>
-
-<!-- Baseline Toast -->
-  <div v-if="recalculateStatus" class="baseline-toast">{{ recalculateStatus }}</div>
 
   <!-- Custom Dialog Modal -->
   <div v-if="customDialog.show" class="custom-dialog-overlay">
