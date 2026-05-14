@@ -53,42 +53,52 @@ export function useGantt() {
   const loadMetadataOnly = async () => {
     if (!directoryHandle.value) return;
     try {
-      // 1. Read feriados.csv
+      // 1. Read feriados.json
       try {
-        const hHandle = await directoryHandle.value.getFileHandle('feriados.csv');
+        const hHandle = await directoryHandle.value.getFileHandle('feriados.json');
         const hFile = await hHandle.getFile();
         const hContent = await hFile.text();
-        const hParsed = Papa.parse(hContent, { header: true, skipEmptyLines: true });
+        let parsed = {};
+        try { parsed = JSON.parse(hContent); } catch(e) {}
         const newHols = {};
-        hParsed.data.forEach(r => {
-          const d = r['Data'] || r['data'] || r['date'];
-          const n = r['Nome'] || r['nome'] || r['name'];
-          if (d) {
-            const parsedD = parseDate(d);
-            if (parsedD) {
-              newHols[parsedD.toISOString().split('T')[0]] = n;
+        if (Array.isArray(parsed)) {
+          parsed.forEach(r => {
+            const d = r.data || r.date;
+            const n = r.nome || r.name;
+            if (d) {
+              const parsedD = parseDate(d);
+              if (parsedD) newHols[parsedD.toISOString().split('T')[0]] = n;
             }
-          }
-        });
+          });
+        } else if (parsed && typeof parsed === 'object') {
+          Object.entries(parsed).forEach(([d, n]) => {
+            const parsedD = parseDate(d);
+            if (parsedD) newHols[parsedD.toISOString().split('T')[0]] = n;
+          });
+        }
         holidaysMap.value = newHols;
-      } catch (e) { console.warn("feriados.csv not found"); }
+      } catch (e) { console.warn("feriados.json not found"); }
 
-      // 2. Read projeto.csv
+      // 2. Read portfolio.json
       let metadadosContent = null;
       try {
-        const mHandle = await directoryHandle.value.getFileHandle('projeto.csv');
+        const mHandle = await directoryHandle.value.getFileHandle('portfolio.json');
         const mFile = await mHandle.getFile();
         metadadosContent = await mFile.text();
-      } catch (e) { console.warn("projeto.csv not found"); }
+      } catch (e) { console.warn("portfolio.json not found"); }
 
       if (metadadosContent) {
-        const metaParsed = Papa.parse(metadadosContent, { header: true, skipEmptyLines: true });
-        projectOptions.value = metaParsed.data.map(m => ({
-          name: m['Nome do Projeto'] || m['nome do projeto'] || m['nome'] || m['name'] || 'Meu Projeto',
-          startDate: m['Data Inicial'] || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
-          manager: m['Gerente'] || m['gerente'] || m['manager'] || '',
-          tasksFile: m['Arquivo de Tarefas'] || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
-        }));
+        try {
+          const metaRows = JSON.parse(metadadosContent);
+          if (Array.isArray(metaRows)) {
+            projectOptions.value = metaRows.map(m => ({
+              name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
+              startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
+              manager: m.manager || m.gerente || '',
+              tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
+            }));
+          } else { projectOptions.value = []; }
+        } catch(e) { projectOptions.value = []; }
       } else {
         projectOptions.value = [];
       }
@@ -300,7 +310,7 @@ export function useGantt() {
       if (projectOptions.value.length > 0) {
         showProjectSelector.value = true;
       } else {
-        alert("Nenhum projeto cadastrado no arquivo projeto.csv.");
+        alert("Nenhum projeto cadastrado no arquivo portfolio.json.");
       }
     } catch (err) {
       console.error(err);

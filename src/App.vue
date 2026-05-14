@@ -199,7 +199,7 @@ const progressColor = computed(() => {
         <v-empty-state
           icon="mdi-folder-open-outline"
           title="Nenhum Projeto Carregado"
-          text="Selecione a pasta contendo os arquivos projeto.csv, tarefas.csv e feriados.csv para começar."
+          text="Selecione a pasta contendo os arquivos portfolio.json, tarefas.csv e feriados.json para começar."
         >
           <v-btn color="primary" @click="openProjectFolder" class="mt-4" size="x-large">
             Selecionar Pasta do Projeto
@@ -224,7 +224,7 @@ const progressColor = computed(() => {
 
         <v-card-text class="pa-6">
           <div class="text-body-1 text-medium-emphasis mb-4">
-            Escolha um dos projetos cadastrados no arquivo <code class="bg-grey-lighten-4 px-1 rounded">projeto.csv</code>:
+            Escolha um dos projetos cadastrados no arquivo <code class="bg-grey-lighten-4 px-1 rounded">portfolio.json</code>:
           </div>
 
           <v-list class="bg-transparent pa-0" density="comfortable">

@@ -190,6 +190,16 @@ const App = {
     const showHolidaysModal = ref(false);
     const showEditModal = ref(false);
     const showExportModal = ref(false);
+    const showNewProjectWizard = ref(false);
+
+    // Wizard State
+    const wizardStep = ref(1);
+    const wizardName = ref('');
+    const wizardManager = ref('');
+    const wizardColor = ref('#0984e3');
+    const wizardStartDate = ref(new Date().toISOString().split('T')[0]);
+    const wizardIncludeHolidays = ref(true);
+    const wizardTemplate = ref('software');
 
     // Temp variables for modals
     const editingTask = ref(null);
@@ -236,6 +246,15 @@ const App = {
       if (zoomLevel.value === 'week') return 60;
       return 100;
     });
+
+    const sanitizeFilename = (name) => {
+      if (!name) return 'tarefas.csv';
+      return name.normalize("NFD")
+                 .replace(/[\u0300-\u036f]/g, "")
+                 .replace(/[^a-zA-Z0-9_\- ]/g, "")
+                 .trim()
+                 .replace(/\s+/g, "_") + ".csv";
+    };
 
     const addToast = (message, type = 'info', duration = 4000) => {
       const id = Date.now() + Math.random().toString(36).substr(2, 5);
@@ -450,12 +469,14 @@ const App = {
         projectOptions.value[idx].manager = tempProjectMetadata.value.manager;
         projectOptions.value[idx].startDate = tempProjectMetadata.value.startDate;
       } else {
+        const cleanName = sanitizeFilename(tempProjectMetadata.value.name || 'Novo Projeto');
         projectOptions.value.push({
           name: tempProjectMetadata.value.name,
           manager: tempProjectMetadata.value.manager,
           startDate: tempProjectMetadata.value.startDate,
-          tasksFile: projectMetadata.value.tasksFile
+          tasksFile: cleanName
         });
+        projectMetadata.value.tasksFile = cleanName;
       }
 
       // Update active metadata
@@ -467,13 +488,10 @@ const App = {
       localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
       localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
 
-      // Save to projeto.csv
-      let csvContent = "Nome do Projeto;Data Inicial;Gerente;Arquivo de Tarefas\n";
-      projectOptions.value.forEach(p => {
-        csvContent += `"${p.name}";"${p.startDate}";"${p.manager}";"${p.tasksFile}"\n`;
-      });
+      // Save to portfolio.json
+      const jsonContent = JSON.stringify(projectOptions.value, null, 2);
 
-      const ok = await saveFileToDisk('projeto.csv', csvContent);
+      const ok = await saveFileToDisk('portfolio.json', jsonContent);
       if (ok) {
         showProjectSettingsModal.value = false;
         calculateSchedule(tasks.value, projectMetadata.value.startDate);
@@ -492,12 +510,9 @@ const App = {
 
     // Holidays Saver
     const saveHolidaysToDisk = async () => {
-      let csvContent = "Data;Nome\n";
-      Object.entries(holidaysMap.value).sort((a, b) => a[0].localeCompare(b[0])).forEach(([d, n]) => {
-        csvContent += `${d};"${n}"\n`;
-      });
       localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
-      await saveFileToDisk('feriados.csv', csvContent);
+      const jsonContent = JSON.stringify(holidaysMap.value, null, 2);
+      await saveFileToDisk('feriados.json', jsonContent);
     };
 
     const addHoliday = async () => {
@@ -536,39 +551,45 @@ const App = {
     const loadProject = async () => {
       if (!directoryHandle.value) return;
       try {
-        // 1. Read projeto.csv
+        // 1. Read portfolio.json
         let metadadosContent = null;
         try {
-          const mHandle = await directoryHandle.value.getFileHandle('projeto.csv');
+          const mHandle = await directoryHandle.value.getFileHandle('portfolio.json');
           const mFile = await mHandle.getFile();
           metadadosContent = await mFile.text();
-        } catch (e) { console.warn("projeto.csv not found"); }
+        } catch (e) { console.warn("portfolio.json not found"); }
 
         if (metadadosContent) {
-          const metaRows = parseCSV(metadadosContent);
-          projectOptions.value = metaRows.map(m => ({
-            name: m['nome do projeto'] || m['nome'] || m['name'] || 'Meu Projeto',
-            startDate: m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
-            manager: m['gerente'] || m['manager'] || '',
-            tasksFile: m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
-          }));
+          try {
+            const metaRows = JSON.parse(metadadosContent);
+            if (Array.isArray(metaRows)) {
+              projectOptions.value = metaRows.map(m => ({
+                name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
+                startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
+                manager: m.manager || m.gerente || '',
+                tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
+              }));
 
-          localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
+              localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
 
-          if (projectOptions.value.length > 0) {
-            // Check if there's a cached active project Name
-            const savedProjectName = localStorage.getItem('activeProjectName');
-            const found = projectOptions.value.find(p => p.name === savedProjectName);
-            if (found) {
-              projectMetadata.value = { ...found };
-            } else {
-              projectMetadata.value = { ...projectOptions.value[0] };
+              if (projectOptions.value.length > 0) {
+                // Check if there's a cached active project Name
+                const savedProjectName = localStorage.getItem('activeProjectName');
+                const found = projectOptions.value.find(p => p.name === savedProjectName);
+                if (found) {
+                  projectMetadata.value = { ...found };
+                } else {
+                  projectMetadata.value = { ...projectOptions.value[0] };
+                }
+                localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+              }
             }
-            localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+          } catch (e) {
+            console.error("Erro ao analisar portfolio.json", e);
           }
         }
 
-        // 2. Read feriados.csv
+        // 2. Read feriados.json
         await loadHolidays();
 
         // 3. Read tasks
@@ -583,19 +604,29 @@ const App = {
     const loadHolidays = async () => {
       if (!directoryHandle.value) return;
       try {
-        const hHandle = await directoryHandle.value.getFileHandle('feriados.csv');
+        const hHandle = await directoryHandle.value.getFileHandle('feriados.json');
         const hFile = await hHandle.getFile();
         const hContent = await hFile.text();
-        const hRows = parseCSV(hContent);
+        let parsed = {};
+        try {
+          parsed = JSON.parse(hContent);
+        } catch(e) { console.error("Erro ao analisar feriados.json", e); }
+
         const newHols = {};
-        hRows.forEach(r => {
-          const d = r['data'] || r['date'];
-          const n = r['nome'] || r['name'];
-          if (d) newHols[d] = n;
-        });
+        if (Array.isArray(parsed)) {
+          parsed.forEach(r => {
+            const d = r.data || r.date;
+            const n = r.nome || r.name;
+            if (d) newHols[d] = n;
+          });
+        } else if (parsed && typeof parsed === 'object') {
+          Object.entries(parsed).forEach(([d, n]) => {
+            newHols[d] = n;
+          });
+        }
         holidaysMap.value = newHols;
         localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
-      } catch (e) { console.warn("feriados.csv not found"); }
+      } catch (e) { console.warn("feriados.json not found"); }
     };
 
     const loadTasks = async () => {
@@ -901,6 +932,131 @@ const App = {
       }
       // Fallback se não houver handle ou se a solicitação falhar
       await openProjectFolder();
+    };
+
+    // Wizard de Criação do Zero
+    const startNewProjectWizard = () => {
+      wizardStep.value = 1;
+      wizardName.value = '';
+      wizardManager.value = '';
+      wizardColor.value = '#0984e3';
+      wizardStartDate.value = new Date().toISOString().split('T')[0];
+      wizardIncludeHolidays.value = true;
+      wizardTemplate.value = 'software';
+      showNewProjectWizard.value = true;
+    };
+
+    const nextWizardStep = () => {
+      if (wizardStep.value === 1) {
+        if (!wizardName.value.trim()) {
+          addToast("Informe o nome do projeto antes de prosseguir.", "warn");
+          return;
+        }
+      } else if (wizardStep.value === 2) {
+        if (!wizardStartDate.value) {
+          addToast("Informe a data de início do projeto.", "warn");
+          return;
+        }
+      }
+      wizardStep.value++;
+    };
+
+    const confirmCreateProject = async () => {
+      try {
+        directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
+        hasFolder.value = true;
+        localStorage.setItem('hasFolder', 'true');
+        await saveHandleToDB(directoryHandle.value);
+        permissionStatus.value = 'granted';
+
+        // 1. Configurar feriados se solicitado
+        if (wizardIncludeHolidays.value) {
+          const currYear = new Date(wizardStartDate.value).getFullYear();
+          const defaultHols = {
+            [`${currYear}-01-01`]: "Confraternização Universal (Ano Novo)",
+            [`${currYear}-04-21`]: "Tiradentes",
+            [`${currYear}-05-01`]: "Dia do Trabalho",
+            [`${currYear}-09-07`]: "Independência do Brasil",
+            [`${currYear}-10-12`]: "Nossa Senhora Aparecida",
+            [`${currYear}-11-02`]: "Finados",
+            [`${currYear}-11-15`]: "Proclamação da República",
+            [`${currYear}-12-25`]: "Natal"
+          };
+          holidaysMap.value = defaultHols;
+          localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
+          await saveFileToDisk('feriados.json', JSON.stringify(defaultHols, null, 2));
+        } else {
+          holidaysMap.value = {};
+          localStorage.setItem('holidaysMap', JSON.stringify({}));
+          await saveFileToDisk('feriados.json', JSON.stringify({}, null, 2));
+        }
+
+        // 2. Configurar tarefas baseadas no template
+        let initTasks = [];
+        if (wizardTemplate.value === 'blank') {
+          initTasks = [
+            { id: 1, task: "Planejamento Inicial", duration: 5, percent: 0, predecessor: "", type: "FS" }
+          ];
+        } else if (wizardTemplate.value === 'software') {
+          initTasks = [
+            { id: 1, task: "Levantamento de Requisitos", duration: 5, percent: 0, predecessor: "", type: "FS" },
+            { id: 2, task: "Arquitetura e Design UI/UX", duration: 7, percent: 0, predecessor: "1", type: "FS" },
+            { id: 3, task: "Desenvolvimento Backend", duration: 15, percent: 0, predecessor: "2", type: "FS" },
+            { id: 4, task: "Desenvolvimento Frontend", duration: 15, percent: 0, predecessor: "2", type: "SS" },
+            { id: 5, task: "Testes e Qualidade (QA)", duration: 6, percent: 0, predecessor: "3,4", type: "FS" },
+            { id: 6, task: "Homologação e Implantação", duration: 3, percent: 0, predecessor: "5", type: "FS" }
+          ];
+        } else if (wizardTemplate.value === 'civil') {
+          initTasks = [
+            { id: 1, task: "Projetos e Licenciamento", duration: 10, percent: 0, predecessor: "", type: "FS" },
+            { id: 2, task: "Terraplenagem e Fundações", duration: 15, percent: 0, predecessor: "1", type: "FS" },
+            { id: 3, task: "Estrutura e Alvenaria", duration: 25, percent: 0, predecessor: "2", type: "FS" },
+            { id: 4, task: "Instalações Elétricas e Hidráulicas", duration: 12, percent: 0, predecessor: "3", type: "FS" },
+            { id: 5, task: "Acabamento e Pintura", duration: 15, percent: 0, predecessor: "4", type: "FS" },
+            { id: 6, task: "Vistoria e Entrega", duration: 3, percent: 0, predecessor: "5", type: "FS" }
+          ];
+        }
+
+        // Enriquecer e calcular
+        const mappedInit = initTasks.map(t => ({
+          ...t,
+          plannedStart: '', plannedEnd: '', realStart: null, realEnd: null, baselineStart: '', baselineEnd: '', baselineDate: '',
+          start: null, end: null, selectedForBaseline: true
+        }));
+
+        // Atualizar metadata
+        const cleanName = sanitizeFilename(wizardName.value.trim() || 'Novo Projeto');
+        projectMetadata.value = {
+          name: wizardName.value.trim() || 'Novo Projeto',
+          startDate: wizardStartDate.value,
+          manager: wizardManager.value.trim() || '',
+          tasksFile: cleanName
+        };
+        localStorage.setItem('activeProjectName', projectMetadata.value.name);
+        localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+
+        const existingIdx = projectOptions.value.findIndex(p => p.tasksFile === cleanName);
+        if (existingIdx !== -1) {
+          projectOptions.value[existingIdx] = { ...projectMetadata.value };
+        } else {
+          projectOptions.value.push({ ...projectMetadata.value });
+        }
+        localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
+
+        await saveFileToDisk('portfolio.json', JSON.stringify(projectOptions.value, null, 2));
+
+        calculateSchedule(mappedInit, projectMetadata.value.startDate);
+        tasks.value = mappedInit;
+        localStorage.setItem('tasks', JSON.stringify(mappedInit));
+        buildTimeline();
+        await saveTasksToDisk();
+
+        showNewProjectWizard.value = false;
+        addToast(`🚀 Projeto "${projectMetadata.value.name}" criado e inicializado com sucesso na pasta!`, 'success', 5000);
+      } catch (err) {
+        console.error(err);
+        addToast("A criação do projeto foi cancelada ou ocorreu um erro de permissão.", "warn");
+      }
     };
 
     const setZoom = (level) => {
@@ -1533,12 +1689,13 @@ const App = {
       toasts, customDialog, addToast, removeToast, showCustomAlert, showCustomConfirm,
 
       // Modals Control
-      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal,
+      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal, showNewProjectWizard,
+      wizardStep, wizardName, wizardManager, wizardColor, wizardStartDate, wizardIncludeHolidays, wizardTemplate,
       editingTask, hasPlannedDates, projectOptions, tempProjectMetadata,
       newHolidayDate, newHolidayName, sortedHolidays, tooltip,
 
       // Operations
-      openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
+      startNewProjectWizard, nextWizardStep, confirmCreateProject, openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
       addHoliday, removeHoliday, addNewTask, openEditModal, closeEditModal,
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,

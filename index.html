@@ -671,8 +671,11 @@ input[type="range"].modal-input {
     </div>
     <div class="controls">
       <button class="btn" @click="openProjectFolder">📂 Abrir Pasta</button>
+      <button class="btn" @click="startNewProjectWizard" style="background: linear-gradient(135deg, var(--success), #05c46b); border: none; box-shadow: 0 4px 15px rgba(5, 196, 107, 0.3);" title="Criar um novo projeto do zero em uma pasta vazia">
+        ✨ Criar do Zero
+      </button>
       
-      <!-- Alternar projetos de projeto.csv -->
+      <!-- Alternar projetos de portfolio.json -->
       <button class="btn-secondary" @click="showProjectSelector = true" v-if="hasFolder && projectOptions.length > 0">
         📁 Alterar Projeto
       </button>
@@ -900,7 +903,7 @@ input[type="range"].modal-input {
 
   <div class="empty-state" v-else>
     <h2>Nenhum projeto carregado</h2>
-    <p>Clique no botão acima para selecionar a pasta do seu projeto contendo os arquivos de configuração (projeto.csv, feriados.csv) e planilhas de tarefas.</p>
+    <p>Clique no botão acima para selecionar a pasta do seu projeto contendo os arquivos de configuração (portfolio.json, feriados.json) e planilhas de tarefas.</p>
     <button class="btn-cta" @click="openProjectFolder">📂 Selecionar Pasta</button>
   </div>
 
@@ -959,7 +962,7 @@ input[type="range"].modal-input {
         <button v-if="hasFolder" class="btn-remove" @click="showProjectSelector = false">✕</button>
       </h3>
       <p style="margin-top: 4px; font-size:12px; color:var(--text3);">
-        Escolha um dos projetos configurados no arquivo <code>projeto.csv</code> para carregar o seu cronograma correspondente.
+        Escolha um dos projetos configurados no arquivo <code>portfolio.json</code> para carregar o seu cronograma correspondente.
       </p>
       <hr style="border:0; border-top:1px solid var(--border); margin:12px 0;" />
       
@@ -1234,6 +1237,130 @@ input[type="range"].modal-input {
 
       <div class="modal-footer" style="display: flex; justify-content: flex-end;">
         <button class="btn-secondary" @click="showExportModal = false">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de Criação de Projeto do Zero (Wizard) -->
+  <div class="modal-overlay" :style="{ display: showNewProjectWizard ? 'flex' : 'none' }" @click.self="showNewProjectWizard = false">
+    <div class="modal" style="max-width: 650px; width: 95%;">
+      <h3 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <span>✨ Criar Novo Projeto do Zero</span>
+        <button class="btn-remove" @click="showNewProjectWizard = false" style="font-size: 18px; padding: 4px 8px;">✕</button>
+      </h3>
+
+      <div class="wizard-progress" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; position: relative;">
+        <div style="position: absolute; top: 50%; left: 0; right: 0; height: 2px; background: var(--border); z-index: 1;"></div>
+        
+        <div :class="['wizard-step', wizardStep >= 1 ? 'active' : '']" style="position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; background: var(--surface2); padding: 0 10px;">
+          <div class="step-num" :style="{ background: wizardStep >= 1 ? 'var(--accent)' : 'var(--surface3)', color: wizardStep >= 1 ? '#fff' : 'var(--text-muted)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', marginBottom: '6px', border: '2px solid ' + (wizardStep >= 1 ? 'var(--accent)' : 'var(--border)') }">1</div>
+          <span style="font-size: 12px; color: wizardStep >= 1 ? 'var(--text)' : 'var(--text-muted);'">Identidade</span>
+        </div>
+
+        <div :class="['wizard-step', wizardStep >= 2 ? 'active' : '']" style="position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; background: var(--surface2); padding: 0 10px;">
+          <div class="step-num" :style="{ background: wizardStep >= 2 ? 'var(--accent)' : 'var(--surface3)', color: wizardStep >= 2 ? '#fff' : 'var(--text-muted)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', marginBottom: '6px', border: '2px solid ' + (wizardStep >= 2 ? 'var(--accent)' : 'var(--border)') }">2</div>
+          <span style="font-size: 12px; color: wizardStep >= 2 ? 'var(--text)' : 'var(--text-muted);'">Calendário</span>
+        </div>
+
+        <div :class="['wizard-step', wizardStep >= 3 ? 'active' : '']" style="position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; background: var(--surface2); padding: 0 10px;">
+          <div class="step-num" :style="{ background: wizardStep >= 3 ? 'var(--accent)' : 'var(--surface3)', color: wizardStep >= 3 ? '#fff' : 'var(--text-muted)', width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', marginBottom: '6px', border: '2px solid ' + (wizardStep >= 3 ? 'var(--accent)' : 'var(--border)') }">3</div>
+          <span style="font-size: 12px; color: wizardStep >= 3 ? 'var(--text)' : 'var(--text-muted);'">Template</span>
+        </div>
+      </div>
+
+      <!-- Etapa 1: Identidade -->
+      <div v-if="wizardStep === 1">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px;">Nome do Projeto <span style="color:#ff4757">*</span></label>
+          <input type="text" v-model="wizardName" placeholder="Ex: Implantação ERP - Módulo Financeiro" style="width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface1); color: var(--text); font-size: 14px;" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px;">Gerente / Líder do Projeto</label>
+          <input type="text" v-model="wizardManager" placeholder="Ex: Carlos Albuquerque" style="width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface1); color: var(--text); font-size: 14px;" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px;">Cor de Destaque (Tema)</label>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <input type="color" v-model="wizardColor" style="width: 44px; height: 38px; border: none; cursor: pointer; background: transparent; border-radius: 6px;" />
+            <span style="font-size: 14px; color: var(--text-muted);">{{ wizardColor }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Etapa 2: Calendário -->
+      <div v-if="wizardStep === 2">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px;">Data de Início do Projeto <span style="color:#ff4757">*</span></label>
+          <input type="date" v-model="wizardStartDate" style="width: 100%; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface1); color: var(--text); font-size: 14px;" />
+          <p style="font-size: 12px; color: var(--text-muted); margin: 6px 0 0 0;">Esta será a data base para as tarefas inaugurais do projeto.</p>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label style="display: block; font-weight: 500; margin-bottom: 6px; font-size: 14px;">Feriados Nacionais</label>
+          <div style="background: var(--surface3); border-radius: 8px; padding: 12px; border: 1px solid var(--border);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+              <span style="font-size: 14px; font-weight: 500;">Incluir feriados brasileiros padrão?</span>
+              <input type="checkbox" v-model="wizardIncludeHolidays" style="width: 18px; height: 18px;" />
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">(Ex: 01/01 Ano Novo, 21/04 Tiradentes, 01/05 Trabalho, 07/09 Indep., 12/10 N.S.Ap., 02/11 Finados, 15/11 Rep., 25/12 Natal)</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Etapa 3: Template -->
+      <div v-if="wizardStep === 3">
+        <label style="display: block; font-weight: 500; margin-bottom: 12px; font-size: 14px;">Escolha a Estrutura de Tarefas Iniciais</label>
+        
+        <div style="display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 20px;">
+          <!-- Template 1: Em Branco -->
+          <div @click="wizardTemplate = 'blank'" :style="{ padding: '14px', borderRadius: '8px', border: '1px solid ' + (wizardTemplate === 'blank' ? 'var(--accent)' : 'var(--border)'), background: wizardTemplate === 'blank' ? 'var(--surface3)' : 'var(--surface1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px' }">
+            <div style="font-size: 24px;">📄</div>
+            <div>
+              <h4 style="margin: 0 0 4px 0; font-size: 14px; color: var(--text);">Projeto em Branco</h4>
+              <p style="margin: 0; font-size: 12px; color: var(--text-muted);">Começar com apenas uma tarefa inaugural de planejamento.</p>
+            </div>
+            <div style="margin-left: auto;">
+              <input type="radio" name="wiz_tpl" :checked="wizardTemplate === 'blank'" />
+            </div>
+          </div>
+
+          <!-- Template 2: Desenvolvimento de Software -->
+          <div @click="wizardTemplate = 'software'" :style="{ padding: '14px', borderRadius: '8px', border: '1px solid ' + (wizardTemplate === 'software' ? 'var(--accent)' : 'var(--border)'), background: wizardTemplate === 'software' ? 'var(--surface3)' : 'var(--surface1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px' }">
+            <div style="font-size: 24px;">💻</div>
+            <div>
+              <h4 style="margin: 0 0 4px 0; font-size: 14px; color: var(--text);">Desenvolvimento de Software / TI</h4>
+              <p style="margin: 0; font-size: 12px; color: var(--text-muted);">Fases de Análise de Requisitos, Design, Dev, Testes e Homologação.</p>
+            </div>
+            <div style="margin-left: auto;">
+              <input type="radio" name="wiz_tpl" :checked="wizardTemplate === 'software'" />
+            </div>
+          </div>
+
+          <!-- Template 3: Engenharia / Construção -->
+          <div @click="wizardTemplate = 'civil'" :style="{ padding: '14px', borderRadius: '8px', border: '1px solid ' + (wizardTemplate === 'civil' ? 'var(--accent)' : 'var(--border)'), background: wizardTemplate === 'civil' ? 'var(--surface3)' : 'var(--surface1)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '14px' }">
+            <div style="font-size: 24px;">🏗️</div>
+            <div>
+              <h4 style="margin: 0 0 4px 0; font-size: 14px; color: var(--text);">Engenharia / Obras Civis</h4>
+              <p style="margin: 0; font-size: 12px; color: var(--text-muted);">Fases de Projeto Executivo, Licenciamento, Fundações, Estrutura e Acabamento.</p>
+            </div>
+            <div style="margin-left: auto;">
+              <input type="radio" name="wiz_tpl" :checked="wizardTemplate === 'civil'" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <button v-if="wizardStep > 1" class="btn-secondary" @click="wizardStep--">⬅️ Voltar</button>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn-secondary" @click="showNewProjectWizard = false">Cancelar</button>
+          <button v-if="wizardStep < 3" class="btn" @click="nextWizardStep" style="background: linear-gradient(135deg, var(--accent), #6c5ce7)">Próximo ➡️</button>
+          <button v-if="wizardStep === 3" class="btn" @click="confirmCreateProject" style="background: linear-gradient(135deg, var(--success), #10ac84)">🚀 Criar Pasta e Projeto</button>
+        </div>
       </div>
     </div>
   </div>
