@@ -712,6 +712,12 @@ input[type="range"].modal-input {
       <button class="btn" @click="showExportModal = true" v-if="hasFolder" style="background: linear-gradient(135deg, #341f97, var(--accent))" title="Exportar Cronograma e Relatórios">
         📥 Exportar...
       </button>
+      <button class="btn-secondary" @click="exportProjectFiles" v-if="hasFolder && !directoryHandle" style="font-size:10px" title="Baixar os arquivos do projeto para o disco">
+        💾 Salvar Arquivos
+      </button>
+      <button class="btn-secondary" @click="importFilesFromDisk" v-if="hasFolder && !directoryHandle && tasks.length > 0" style="font-size:10px" title="Importar mais arquivos CSV/JSON">
+        📂 Importar
+      </button>
     </div>
   </div>
 

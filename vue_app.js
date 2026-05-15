@@ -58,6 +58,34 @@ function getLocalISOString(d) {
   return `${year}-${month}-${day}`;
 }
 
+function sanitizeCSV(val) {
+  if (typeof val !== 'string') return val;
+  if (/^[=+\-@|]/.test(val)) return "'" + val;
+  return val;
+}
+
+function hasLocalStorageFiles() {
+  try {
+    const index = localStorage.getItem('gantt_fs_index');
+    return !!(index && JSON.parse(index).length > 0);
+  } catch { return false; }
+}
+
+function encodeCache(data) {
+  try { return 'e:' + btoa(encodeURIComponent(JSON.stringify(data))); }
+  catch { return JSON.stringify(data); }
+}
+
+function decodeCache(str) {
+  if (!str || typeof str !== 'string') return null;
+  if (str.startsWith('e:')) {
+    try { return JSON.parse(decodeURIComponent(atob(str.slice(2)))); }
+    catch { return null; }
+  }
+  try { return JSON.parse(str); }
+  catch { return null; }
+}
+
 function toInputDateFormat(val) {
   if (!val) return '';
   const str = String(val).trim();
@@ -74,6 +102,25 @@ function toInputDateFormat(val) {
     return `${y}-${m}-${day}`;
   }
   return '';
+}
+
+function formatDatePT(dateStr) {
+  if (!dateStr) return '--';
+  if (dateStr instanceof Date) {
+    const day = String(dateStr.getDate()).padStart(2, '0');
+    const month = String(dateStr.getMonth() + 1).padStart(2, '0');
+    const year = dateStr.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+  const parts = dateStr.split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return dateStr;
+}
+
+function getDayOfWeekPT(dateStr) {
+  if (!dateStr) return '';
+  const d = parseDate(dateStr);
+  return d ? DAYS_PT[d.getDay()] : '';
 }
 
 // IndexedDB Directory Handle Persistence
@@ -334,29 +381,7 @@ const App = {
       return idx;
     };
 
-    // Parse Portuguese date back to local standard
-    const formatDatePT = (dateStr) => {
-      if (!dateStr) return '--';
-      if (dateStr instanceof Date) {
-        const d = dateStr;
-        const day = String(d.getDate()).padStart(2, '0');
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const year = d.getFullYear();
-        return `${day}/${month}/${year}`;
-      }
-      const parts = dateStr.split('-');
-      if (parts.length === 3) {
-        return `${parts[2]}/${parts[1]}/${parts[0]}`;
-      }
-      return dateStr;
-    };
-
-    const getDayOfWeekPT = (dateStr) => {
-      if (!dateStr) return '';
-      const d = parseDate(dateStr);
-      if (!d) return '';
-      return DAYS_PT[d.getDay()];
-    };
+    // Format utilities (top-level implementations)
 
     // CSV Parser with Semicolon and Comma auto-detection
     const parseCSV = (text) => {
@@ -393,22 +418,103 @@ const App = {
       return result;
     };
 
-    // File System Access Save Handler
-    const saveFileToDisk = async (filename, content) => {
-      if (!directoryHandle.value) {
-        console.warn("Folder is not connected. Saving to localStorage cache instead.");
-        return false;
+    // Read file from FileSystem API or localStorage fallback
+    const readFileFromDisk = async (filename) => {
+      if (directoryHandle.value) {
+        try {
+          const handle = await directoryHandle.value.getFileHandle(filename);
+          const file = await handle.getFile();
+          return await file.text();
+        } catch { return null; }
       }
+      // Fallback: read from localStorage
       try {
-        const handle = await directoryHandle.value.getFileHandle(filename, { create: true });
-        const writable = await handle.createWritable();
-        // UTF-8 BOM to ensure Excel opens Portuguese characters correctly
-        await writable.write('\ufeff' + content);
-        await writable.close();
+        return localStorage.getItem('gantt_fs_' + filename);
+      } catch { return null; }
+    };
+
+    const promptFileImport = () => {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.csv,.json';
+        input.multiple = true;
+        input.onchange = async () => {
+          const files = input.files;
+          if (!files || !files.length) { resolve({}); return; }
+          const result = {};
+          for (let i = 0; i < files.length; i++) {
+            try {
+              result[files[i].name] = await files[i].text();
+            } catch {}
+          }
+          resolve(result);
+        };
+        input.click();
+      });
+    };
+
+    const importFilesFromDisk = async () => {
+      const files = await promptFileImport();
+      const entries = Object.entries(files);
+      if (entries.length === 0) return;
+      entries.forEach(([name, content]) => {
+        localStorage.setItem('gantt_fs_' + name, content);
+        const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
+        if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
+      });
+      await loadProject();
+      addToast(`📂 ${entries.length} arquivo(s) importado(s)!`, 'success');
+    };
+
+    // Create backup of existing file before overwriting
+    const backupFile = async (filename) => {
+      const existing = await readFileFromDisk(filename);
+      if (existing === null) return;
+      const bakName = filename + '.bak';
+      if (directoryHandle.value) {
+        try {
+          const bakHandle = await directoryHandle.value.getFileHandle(bakName, { create: true });
+          const bakWritable = await bakHandle.createWritable();
+          await bakWritable.write('\ufeff' + existing);
+          await bakWritable.close();
+        } catch (err) {
+          console.warn('Failed to create backup for ' + filename, err);
+        }
+      } else {
+        localStorage.setItem('gantt_fs_' + bakName, existing);
+        const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
+        if (!index.includes(bakName)) { index.push(bakName); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
+      }
+    };
+
+    // File System Access Save Handler with localStorage fallback
+    const saveFileToDisk = async (filename, content) => {
+      await backupFile(filename);
+      if (directoryHandle.value) {
+        try {
+          const handle = await directoryHandle.value.getFileHandle(filename, { create: true });
+          const writable = await handle.createWritable();
+          await writable.write('\ufeff' + content);
+          await writable.close();
+          return true;
+        } catch (err) {
+          console.error("Error writing to file " + filename, err);
+          addToast(`Erro ao salvar o arquivo ${filename} no disco. Certifique-se de que a pasta está conectada e possui permissões de escrita.`, 'error');
+          return false;
+        }
+      }
+      // Fallback: save to localStorage
+      try {
+        localStorage.setItem('gantt_fs_' + filename, content);
+        const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
+        if (!index.includes(filename)) {
+          index.push(filename);
+          localStorage.setItem('gantt_fs_index', JSON.stringify(index));
+        }
         return true;
       } catch (err) {
-        console.error("Error writing to file " + filename, err);
-        addToast(`Erro ao salvar o arquivo ${filename} no disco. Certifique-se de que a pasta está conectada e possui permissões de escrita.`, 'error');
+        console.error("Error saving to localStorage fallback", err);
         return false;
       }
     };
@@ -418,23 +524,23 @@ const App = {
       let csvContent = "ID;Tarefa;Duracao;Progresso;Predecessora;Tipo;Data_Inicial_Real;Data_Final_Real;Data_Inicial_Planejada;Data_Final_Planejada;Data_Inicial_Baseline;Data_Final_Baseline;Baseline_Data\n";
       tasks.value.forEach(t => {
         const id = t.id;
-        const task = t.task.replace(/"/g, '""');
+        const task = sanitizeCSV(t.task.replace(/"/g, '""'));
         const duration = t.duration;
         const percent = t.percent;
-        const pred = t.predecessor || '';
-        const type = t.type || 'FS';
-        const realStart = t.realStart || '';
-        const realEnd = t.realEnd || '';
-        const plannedStart = t.plannedStart || '';
-        const plannedEnd = t.plannedEnd || '';
-        const baselineStart = t.baselineStart || '';
-        const baselineEnd = t.baselineEnd || '';
-        const baselineDate = t.baselineDate || '';
+        const pred = sanitizeCSV(t.predecessor || '');
+        const type = sanitizeCSV(t.type || 'FS');
+        const realStart = sanitizeCSV(t.actualStart || t.realStart || '');
+        const realEnd = sanitizeCSV(t.actualEnd || t.realEnd || '');
+        const plannedStart = sanitizeCSV(t.plannedStart || '');
+        const plannedEnd = sanitizeCSV(t.plannedEnd || '');
+        const baselineStart = sanitizeCSV(t.baselineStart || '');
+        const baselineEnd = sanitizeCSV(t.baselineEnd || '');
+        const baselineDate = sanitizeCSV(t.baselineDate || '');
         csvContent += `${id};"${task}";${duration};${percent};"${pred}";"${type}";"${realStart}";"${realEnd}";"${plannedStart}";"${plannedEnd}";"${baselineStart}";"${baselineEnd}";"${baselineDate}"\n`;
       });
       
       // Save local storage cache too
-      localStorage.setItem('tasks', JSON.stringify(tasks.value));
+      localStorage.setItem('tasks', encodeCache(tasks.value));
       await saveFileToDisk(projectMetadata.value.tasksFile, csvContent);
     };
 
@@ -485,8 +591,8 @@ const App = {
       projectMetadata.value.startDate = tempProjectMetadata.value.startDate;
 
       // Update LocalStorage cache
-      localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
-      localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
+      localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
+      localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
 
       // Save to portfolio.json
       const jsonContent = JSON.stringify(projectOptions.value, null, 2);
@@ -510,18 +616,18 @@ const App = {
 
     // Holidays Saver
     const saveHolidaysToDisk = async () => {
-      localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
+      localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
       const jsonContent = JSON.stringify(holidaysMap.value, null, 2);
       await saveFileToDisk('feriados.json', jsonContent);
     };
 
     const addHoliday = async () => {
-      if (!newHolidayDate.value || !newHolidayName.value.trim()) {
+      const name = (newHolidayName.value || '').trim().substring(0, 100);
+      if (!newHolidayDate.value || !name) {
         addToast("Preencha a data e a descrição do feriado.", "warn");
         return;
       }
       const date = newHolidayDate.value;
-      const name = newHolidayName.value.trim();
       holidaysMap.value[date] = name;
       newHolidayDate.value = '';
       newHolidayName.value = '';
@@ -549,15 +655,10 @@ const App = {
     });
 
     const loadProject = async () => {
-      if (!directoryHandle.value) return;
+      if (!directoryHandle.value && !hasLocalStorageFiles()) return;
       try {
         // 1. Read portfolio.json
-        let metadadosContent = null;
-        try {
-          const mHandle = await directoryHandle.value.getFileHandle('portfolio.json');
-          const mFile = await mHandle.getFile();
-          metadadosContent = await mFile.text();
-        } catch (e) { console.warn("portfolio.json not found"); }
+        let metadadosContent = await readFileFromDisk('portfolio.json');
 
         if (metadadosContent) {
           try {
@@ -570,7 +671,7 @@ const App = {
                 tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
               }));
 
-              localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
+              localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
 
               if (projectOptions.value.length > 0) {
                 // Check if there's a cached active project Name
@@ -581,7 +682,7 @@ const App = {
                 } else {
                   projectMetadata.value = { ...projectOptions.value[0] };
                 }
-                localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+                localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
               }
             }
           } catch (e) {
@@ -602,16 +703,11 @@ const App = {
     };
 
     const loadHolidays = async () => {
-      if (!directoryHandle.value) return;
-      try {
-        const hHandle = await directoryHandle.value.getFileHandle('feriados.json');
-        const hFile = await hHandle.getFile();
-        const hContent = await hFile.text();
+      if (!directoryHandle.value && !hasLocalStorageFiles()) return;
+      const hContent = await readFileFromDisk('feriados.json');
+      if (hContent) {
         let parsed = {};
-        try {
-          parsed = JSON.parse(hContent);
-        } catch(e) { console.error("Erro ao analisar feriados.json", e); }
-
+        try { parsed = JSON.parse(hContent); } catch(e) { console.error("Erro ao analisar feriados.json", e); }
         const newHols = {};
         if (Array.isArray(parsed)) {
           parsed.forEach(r => {
@@ -625,20 +721,13 @@ const App = {
           });
         }
         holidaysMap.value = newHols;
-        localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
-      } catch (e) { console.warn("feriados.json not found"); }
+        localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+      }
     };
 
     const loadTasks = async () => {
-      if (!directoryHandle.value) return;
-      let tContent = null;
-      try {
-        const tHandle = await directoryHandle.value.getFileHandle(projectMetadata.value.tasksFile);
-        const tFile = await tHandle.getFile();
-        tContent = await tFile.text();
-      } catch (e) {
-        console.error("Tasks file not found:", projectMetadata.value.tasksFile);
-      }
+      if (!directoryHandle.value && !hasLocalStorageFiles()) return;
+      let tContent = await readFileFromDisk(projectMetadata.value.tasksFile);
 
       if (tContent) {
         const rawTasks = parseCSV(tContent);
@@ -669,6 +758,8 @@ const App = {
             plannedEnd: plannedEnd,
             realStart: realStartStr || null,
             realEnd: realEndStr || null,
+            actualStart: realStartStr || null,
+            actualEnd: realEndStr || null,
             baselineStart: baselineStart || '',
             baselineEnd: baselineEnd || '',
             baselineDate: baselineDate || '',
@@ -679,7 +770,7 @@ const App = {
         });
         calculateSchedule(mappedTasks, projectMetadata.value.startDate);
         tasks.value = mappedTasks;
-        localStorage.setItem('tasks', JSON.stringify(mappedTasks));
+        localStorage.setItem('tasks', encodeCache(mappedTasks));
         buildTimeline();
       } else {
         tasks.value = [];
@@ -694,7 +785,7 @@ const App = {
         tasksFile: proj.tasksFile
       };
       localStorage.setItem('activeProjectName', proj.name);
-      localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+      localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
       showProjectSelector.value = false;
       await loadTasks();
     };
@@ -702,18 +793,19 @@ const App = {
     const calculateSchedule = (taskList, startDateStr) => {
       const map = {};
       const projStart = parseDate(startDateStr) || new Date();
+
       taskList.forEach(t => {
         t.start = null;
         t.end = null;
-        t.dateSource = 'calculated'; // 'locked' | 'calculated' | 'forecast'
+        t.dateSource = 'calculated';
         map[t.id] = t;
       });
-      const stack = new Set();
 
-      const resolve = (t) => {
+      // Resolve a single task's dates recursively
+      const resolve = (t, visited) => {
         if (!t || t.start) return;
-        
-        // If plannedStart and plannedEnd are locked by the user, use them directly
+
+        // 1. Locked dates (user-defined)
         if (t.plannedStart && t.plannedEnd) {
           t.start = parseDate(t.plannedStart);
           t.end = parseDate(t.plannedEnd);
@@ -721,67 +813,69 @@ const App = {
           return;
         }
 
-        if (stack.has(t.id)) {
+        // 2. Cycle detection
+        if (visited.has(t.id)) {
+          t.start = new Date(projStart);
+          t.dateSource = 'calculated';
+          return;
+        }
+
+        visited.add(t.id);
+
+        // 3. No predecessor: start from project start
+        if (!t.predecessor) {
           t.start = new Date(projStart);
         } else {
-          stack.add(t.id);
-          if (!t.predecessor) {
-            t.start = new Date(projStart);
-          } else {
-            const predStrs = String(t.predecessor).match(/\d+/g) || [];
-            let maxStart = new Date(projStart);
-            let hasValidPred = false;
-            let usedForecast = false;
-            predStrs.forEach(pStr => {
-              const predId = parseInt(pStr);
-              if (map[predId]) {
-                const pred = map[predId];
-                resolve(pred);
-                
-                let candidateStart;
-                if (t.type === 'SS') {
-                  // Start-to-Start: use actual start if available
-                  const predActualStart = pred.realStart ? parseDate(pred.realStart) : null;
-                  candidateStart = predActualStart || new Date(pred.start);
-                  if (predActualStart) usedForecast = true;
-                } else {
-                  // Finish-to-Start (default): use actual end if available for forecast
-                  const predActualEnd = pred.realEnd ? parseDate(pred.realEnd) : null;
-                  if (predActualEnd) {
-                    // Predecessor finished: successor starts next working day after actual end
-                    candidateStart = addWorkingDays(predActualEnd, 1);
-                    usedForecast = true;
-                  } else if (pred.realStart && !pred.realEnd) {
-                    // Predecessor started but not finished: forecast based on actual start + remaining duration
-                    const predRealStart = parseDate(pred.realStart);
-                    const predForecastEnd = addWorkingDays(predRealStart, pred.duration - 1);
-                    candidateStart = addWorkingDays(predForecastEnd, 1);
-                    usedForecast = true;
-                  } else {
-                    // No actual data: use planned end
-                    candidateStart = addWorkingDays(pred.start, pred.duration);
-                  }
-                }
-                if (candidateStart > maxStart) maxStart = candidateStart;
-                hasValidPred = true;
+          // 4. Has predecessor(s): resolve dependencies
+          const predStrs = String(t.predecessor).match(/\d+/g) || [];
+          let maxStart = new Date(projStart);
+          let hasValidPred = false;
+          let usedForecast = false;
+
+          predStrs.forEach(pStr => {
+            const predId = parseInt(pStr);
+            const pred = map[predId];
+            if (!pred) return;
+
+            resolve(pred, visited);
+
+            const predRealStart = parseDate(pred.actualStart || pred.realStart);
+            const predRealEnd = parseDate(pred.actualEnd || pred.realEnd);
+
+            if (t.type === 'SS') {
+              // Start-to-Start: successor starts when predecessor starts
+              const refStart = predRealStart || new Date(pred.start);
+              if (predRealStart) usedForecast = true;
+              if (refStart > maxStart) maxStart = refStart;
+            } else {
+              // Finish-to-Start (default)
+              let refEnd;
+              if (predRealEnd) {
+                refEnd = addWorkingDays(predRealEnd, 1);
+                usedForecast = true;
+              } else if (predRealStart) {
+                const forecastEnd = addWorkingDays(predRealStart, pred.duration - 1);
+                refEnd = addWorkingDays(forecastEnd, 1);
+                usedForecast = true;
+              } else {
+                refEnd = addWorkingDays(new Date(pred.start), pred.duration);
               }
-            });
-            t.start = hasValidPred ? maxStart : new Date(projStart);
-            if (usedForecast && t.dateSource !== 'locked') {
-              t.dateSource = 'forecast';
+              if (refEnd > maxStart) maxStart = refEnd;
             }
-          }
-          stack.delete(t.id);
+            hasValidPred = true;
+          });
+
+          t.start = hasValidPred ? maxStart : new Date(projStart);
+          if (usedForecast && t.dateSource !== 'locked') t.dateSource = 'forecast';
         }
-        
-        // Make sure task starts on a working day
+
+        visited.delete(t.id);
+
         while (!isWorkingDay(t.start)) t.start = addDays(t.start, 1);
-        
-        // End date calculation
         t.end = t.duration <= 0 ? new Date(t.start) : addWorkingDays(t.start, t.duration - 1);
       };
-      
-      taskList.forEach(resolve);
+
+      taskList.forEach(t => resolve(t, new Set()));
     };
 
     // Sprint 5: Forecast Recalculate
@@ -789,12 +883,8 @@ const App = {
       if (!tasks.value.length) return;
       calculateSchedule(tasks.value, projectMetadata.value.startDate);
       buildTimeline();
-      const forecastCount = tasks.value.filter(t => t.dateSource === 'forecast').length;
-      if (forecastCount > 0) {
-        addToast(`🔄 Previsão recalculada — ${forecastCount} tarefa(s) com forecast atualizado`, 'info');
-      } else {
-        addToast('✅ Cronograma recalculado — sem impactos em cascata', 'success');
-      }
+      const fc = tasks.value.filter(t => t.dateSource === 'forecast').length;
+      addToast(fc > 0 ? `🔄 Previsão recalculada — ${fc} tarefa(s) com forecast atualizado` : '✅ Cronograma recalculado — sem impactos em cascata', fc > 0 ? 'info' : 'success');
     };
 
     const buildTimeline = () => {
@@ -904,16 +994,34 @@ const App = {
     };
 
     const openProjectFolder = async () => {
-      try {
-        directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
-        hasFolder.value = true;
-        localStorage.setItem('hasFolder', 'true');
-        await saveHandleToDB(directoryHandle.value);
-        permissionStatus.value = 'granted';
-        await loadProject();
-      } catch (err) {
-        console.error(err);
+      // Try File System Access API first
+      if ('showDirectoryPicker' in window) {
+        try {
+          directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
+          hasFolder.value = true;
+          localStorage.setItem('hasFolder', 'true');
+          await saveHandleToDB(directoryHandle.value);
+          permissionStatus.value = 'granted';
+          await loadProject();
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') return;
+          console.warn('FileSystem API failed, attempting fallback...', err);
+        }
       }
+      // Fallback: import files via file input
+      const files = await promptFileImport();
+      const entries = Object.entries(files);
+      if (entries.length === 0) return;
+      entries.forEach(([name, content]) => {
+        localStorage.setItem('gantt_fs_' + name, content);
+        const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
+        if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
+      });
+      hasFolder.value = true;
+      localStorage.setItem('hasFolder', 'true');
+      await loadProject();
+      addToast(`📂 ${entries.length} arquivo(s) importado(s) via navegador. Use "Exportar" para salvar no disco.`, 'info', 5000);
     };
 
     const reconnectFolder = async () => {
@@ -930,7 +1038,12 @@ const App = {
           console.error('Request permission on directory handle failed:', err);
         }
       }
-      // Fallback se não houver handle ou se a solicitação falhar
+      if (hasLocalStorageFiles()) {
+        permissionStatus.value = 'granted';
+        await loadProject();
+        addToast('Projeto carregado do armazenamento local do navegador.', 'info');
+        return;
+      }
       await openProjectFolder();
     };
 
@@ -963,11 +1076,20 @@ const App = {
 
     const confirmCreateProject = async () => {
       try {
-        directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
+        // Try File System API, fall back to localStorage
+        if ('showDirectoryPicker' in window) {
+          try {
+            directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
+            localStorage.setItem('hasFolder', 'true');
+            await saveHandleToDB(directoryHandle.value);
+            permissionStatus.value = 'granted';
+          } catch (err) {
+            if (err.name === 'AbortError') return;
+            console.warn('FileSystem API failed in wizard, using localStorage fallback');
+          }
+        }
         hasFolder.value = true;
         localStorage.setItem('hasFolder', 'true');
-        await saveHandleToDB(directoryHandle.value);
-        permissionStatus.value = 'granted';
 
         // 1. Configurar feriados se solicitado
         if (wizardIncludeHolidays.value) {
@@ -983,11 +1105,11 @@ const App = {
             [`${currYear}-12-25`]: "Natal"
           };
           holidaysMap.value = defaultHols;
-          localStorage.setItem('holidaysMap', JSON.stringify(holidaysMap.value));
+          localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
           await saveFileToDisk('feriados.json', JSON.stringify(defaultHols, null, 2));
         } else {
           holidaysMap.value = {};
-          localStorage.setItem('holidaysMap', JSON.stringify({}));
+          localStorage.setItem('holidaysMap', encodeCache({}));
           await saveFileToDisk('feriados.json', JSON.stringify({}, null, 2));
         }
 
@@ -1033,7 +1155,7 @@ const App = {
           tasksFile: cleanName
         };
         localStorage.setItem('activeProjectName', projectMetadata.value.name);
-        localStorage.setItem('projectMetadata', JSON.stringify(projectMetadata.value));
+        localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
 
         const existingIdx = projectOptions.value.findIndex(p => p.tasksFile === cleanName);
         if (existingIdx !== -1) {
@@ -1041,13 +1163,13 @@ const App = {
         } else {
           projectOptions.value.push({ ...projectMetadata.value });
         }
-        localStorage.setItem('projectOptions', JSON.stringify(projectOptions.value));
+        localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
 
         await saveFileToDisk('portfolio.json', JSON.stringify(projectOptions.value, null, 2));
 
         calculateSchedule(mappedInit, projectMetadata.value.startDate);
         tasks.value = mappedInit;
-        localStorage.setItem('tasks', JSON.stringify(mappedInit));
+        localStorage.setItem('tasks', encodeCache(mappedInit));
         buildTimeline();
         await saveTasksToDisk();
 
@@ -1273,6 +1395,27 @@ const App = {
     const toggleTheme = () => {
       const current = document.documentElement.getAttribute('data-theme') || 'dark';
       document.documentElement.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    };
+
+    // Export/download project files (useful in localStorage fallback mode)
+    const exportProjectFiles = async () => {
+      const files = ['portfolio.json', 'feriados.json', projectMetadata.value.tasksFile];
+      let exported = 0;
+      for (const name of files) {
+        const content = await readFileFromDisk(name);
+        if (content !== null) {
+          const blob = new Blob(['\ufeff' + content], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = name;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          exported++;
+        }
+      }
+      if (exported > 0) addToast(`📥 ${exported} arquivo(s) do projeto exportado(s)!`, 'success');
+      else addToast('Nenhum arquivo de projeto encontrado para exportar.', 'warn');
     };
 
     const exportPNG = () => {
@@ -1563,11 +1706,13 @@ const App = {
       if (!editingTask.value) return;
       const t = tasks.value.find(x => x.id === editingTask.value.id);
       if (t) {
-        t.task = editingTask.value.task;
-        t.duration = isNaN(parseInt(editingTask.value.duration)) ? 0 : parseInt(editingTask.value.duration);
-        t.predecessor = editingTask.value.predecessor;
-        t.type = editingTask.value.type || 'FS';
-        t.percent = isNaN(parseInt(editingTask.value.percent)) ? 0 : parseInt(editingTask.value.percent);
+        // Validate and sanitize inputs
+        t.task = (editingTask.value.task || '').trim().substring(0, 200);
+        if (!t.task) { showCustomAlert('O nome da tarefa é obrigatório.', 'Validação'); return; }
+        t.duration = Math.max(0, Math.min(9999, parseInt(editingTask.value.duration) || 0));
+        t.predecessor = (editingTask.value.predecessor || '').replace(/[^\d,\s]/g, '');
+        t.type = (editingTask.value.type === 'SS' ? 'SS' : 'FS');
+        t.percent = Math.max(0, Math.min(100, parseInt(editingTask.value.percent) || 0));
 
         if (hasPlannedDates.value) {
           t.plannedStart = editingTask.value.plannedStart;
@@ -1632,18 +1777,18 @@ const App = {
       if (cachedHasFolder) {
         hasFolder.value = true;
         try {
-          const cachedMeta = localStorage.getItem('projectMetadata');
-          if (cachedMeta) projectMetadata.value = JSON.parse(cachedMeta);
+          const cachedMeta = decodeCache(localStorage.getItem('projectMetadata'));
+          if (cachedMeta) projectMetadata.value = cachedMeta;
 
-          const cachedOpts = localStorage.getItem('projectOptions');
-          if (cachedOpts) projectOptions.value = JSON.parse(cachedOpts);
+          const cachedOpts = decodeCache(localStorage.getItem('projectOptions'));
+          if (cachedOpts) projectOptions.value = cachedOpts;
 
-          const cachedHols = localStorage.getItem('holidaysMap');
-          if (cachedHols) holidaysMap.value = JSON.parse(cachedHols);
+          const cachedHols = decodeCache(localStorage.getItem('holidaysMap'));
+          if (cachedHols) holidaysMap.value = cachedHols;
 
-          const cachedTasks = localStorage.getItem('tasks');
-          if (cachedTasks) {
-            const rawCachedTasks = JSON.parse(cachedTasks);
+          const cachedTasks = decodeCache(localStorage.getItem('tasks'));
+          if (cachedTasks && Array.isArray(cachedTasks)) {
+            const rawCachedTasks = cachedTasks;
             tasks.value = rawCachedTasks.map(t => ({
               ...t,
               start: t.start ? new Date(t.start) : null,
@@ -1701,7 +1846,8 @@ const App = {
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
       getBaselineBarLeft, getBaselineBarWidthPx, getTaskDelay, setColumnView,
       saveBaseline, toggleBaselineBars, toggleRealBars, runForecast,
-      startResize, syncScroll, toggleTheme, exportPNG, exportPDF, exportCSVReport, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT
+      startResize, syncScroll, toggleTheme, exportPNG, exportPDF, exportCSVReport, showTooltip, hideTooltip, formatDatePT, getDayOfWeekPT,
+      exportProjectFiles, promptFileImport, importFilesFromDisk
     };
   }
 };
