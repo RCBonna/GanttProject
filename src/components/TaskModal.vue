@@ -15,11 +15,11 @@ const formatDateForInput = (dateStr) => {
 const open = (task) => {
   taskData.value = { ...task };
   // format dates if they exist
-  if (taskData.value.realStart) {
-    taskData.value.realStart = formatDateForInput(taskData.value.realStart);
+  if (taskData.value.actualStart) {
+    taskData.value.actualStart = formatDateForInput(taskData.value.actualStart);
   }
-  if (taskData.value.realEnd) {
-    taskData.value.realEnd = formatDateForInput(taskData.value.realEnd);
+  if (taskData.value.actualEnd) {
+    taskData.value.actualEnd = formatDateForInput(taskData.value.actualEnd);
   }
   dialog.value = true;
 };
@@ -110,7 +110,7 @@ const cancel = () => {
 
             <v-col cols="6">
               <v-text-field
-                v-model="taskData.realStart"
+                v-model="taskData.actualStart"
                 label="Data Inicial Real"
                 type="date"
                 variant="outlined"
@@ -120,7 +120,7 @@ const cancel = () => {
 
             <v-col cols="6">
               <v-text-field
-                v-model="taskData.realEnd"
+                v-model="taskData.actualEnd"
                 label="Data Final Real"
                 type="date"
                 variant="outlined"
