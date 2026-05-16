@@ -15,14 +15,14 @@
   --bg:#0f1117;--surface:#1a1d27;--surface2:#242836;--surface3:#2e3345;
   --accent:#6c5ce7;--accent2:#a29bfe;--accent3:#fd79a8;
   --text:#e8e8f0;--text2:#9ca3b0;--text3:#636b78;
-  --success:#00cec9;--warn:#fdcb6e;--border:#2e3345;
+  --success:#00cec9;--warn:#fdcb6e;--danger:#ff4757;--border:#2e3345;
   --row-h:34px; --col-w:30px; --header-h:40px;
 }
 [data-theme="light"] {
   --bg:#f8f9fa;--surface:#ffffff;--surface2:#f1f3f5;--surface3:#e9ecef;
   --accent:#5352ed;--accent2:#2f3542;--accent3:#ff4757;
   --text:#212529;--text2:#495057;--text3:#adb5bd;
-  --success:#20bf6b;--warn:#f7b731;--border:#dee2e6;
+  --success:#20bf6b;--warn:#f7b731;--danger:#e03131;--border:#dee2e6;
 }
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
 
@@ -806,6 +806,14 @@ input[type="range"].modal-input {
     </button>
   </div>
 
+  <!-- Filter Bar -->
+  <div v-if="hasFolder" style="display:flex; align-items:center; gap:8px; margin:0 0 8px 0; padding:0 2px;">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input v-model="filterText" type="text" placeholder="Filtrar tarefas por nome ou ID..." style="flex:1; max-width:300px; padding:4px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface2); color:var(--text); font-size:12px; outline:none;" />
+    <span v-if="filterText" style="font-size:11px; color:var(--text3);">{{ filteredTasks.length }} de {{ tasks.length }}</span>
+    <button v-if="filterText" @click="filterText = ''" style="background:none; border:none; color:var(--text3); cursor:pointer; font-size:14px; padding:2px;" title="Limpar filtro">✕</button>
+  </div>
+
   <!-- Gantt Wrapper -->
   <div class="gantt-wrapper" id="ganttWrapper" v-if="hasFolder">
     <!-- Task List -->
@@ -820,7 +828,7 @@ input[type="range"].modal-input {
           <span style="font-size:8px">Início Real</span><span style="font-size:8px">Fim Real</span>
         </template>
       </div>
-      <div v-for="t in tasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
+      <div v-for="t in filteredTasks" :key="t.id" :class="['tl-row', t.duration===0?'is-milestone':'', hoverTaskId===t.id?'row-highlight':'', getTaskDelay(t) > 0 ? 'delayed' : '']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null" @dblclick="openEditModal(t)" :style="{display:'grid', gridTemplateColumns: gridTemplate, gap:'0', alignItems:'center'}">
         <div style="display:flex; justify-content:center; align-items:center;" @click.stop>
           <input v-if="t.percent < 100" type="checkbox" v-model="t.selectedForBaseline" title="Selecionar para salvar Baseline" style="cursor: pointer; accent-color: var(--accent);" />
           <span v-else title="Atividade 100% concluída" style="color: var(--success); font-weight: 900; font-size: 14px; line-height: 1; text-shadow: 0 0 6px rgba(0, 206, 201, 0.4);">✓</span>
@@ -866,7 +874,7 @@ input[type="range"].modal-input {
       </div>
       
       <div style="position:relative">
-        <div v-for="(t, i) in tasks" :key="t.id" :class="['ch-row', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
+        <div v-for="(t, i) in filteredTasks" :key="t.id" :class="['ch-row', hoverTaskId===t.id?'row-highlight':'']" @mouseenter="hoverTaskId=t.id" @mouseleave="hoverTaskId=null">
            <div v-for="c in chartColumns" :key="c.id" :class="['ch-cell', c.isWeekend?'weekend':'', c.isHoliday?'holiday':'']" :title="c.holidayName" :style="{minWidth: colWidth+'px', maxWidth: colWidth+'px'}"></div>
            
            <!-- Marco (Milestone) -->
@@ -1073,7 +1081,7 @@ input[type="range"].modal-input {
   </div>
 
   <!-- TASK EDIT MODAL -->
-  <div class="modal-overlay" :style="{ display: showEditModal ? 'flex' : 'none' }">
+  <div class="modal-overlay" :style="{ display: showEditModal ? 'flex' : 'none', cursor: saving ? 'wait' : '' }">
     <div class="modal" style="max-width: 550px; width: 95%;">
       <h3 style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
         <span>✏️ Editar Tarefa #{{ editingTask ? editingTask.id : '' }}</span>
@@ -1084,15 +1092,17 @@ input[type="range"].modal-input {
       <div v-if="editingTask" style="display:flex; flex-direction:column; gap:12px;">
         <!-- Nome da Tarefa -->
         <div class="control-group">
-          <label>Nome da Tarefa</label>
-          <input type="text" v-model="editingTask.task" class="modal-input" />
+          <label>Nome da Tarefa <span style="color:var(--danger)">*</span></label>
+          <input type="text" v-model="editingTask.task" class="modal-input" maxlength="200" placeholder="Nome da atividade" :style="fieldErrors.task ? 'border-color:var(--danger) !important;' : ''" />
+          <span v-if="fieldErrors.task" style="color:var(--danger); font-size:11px; margin-top:2px; display:block;">{{ fieldErrors.task }}</span>
         </div>
         
         <!-- Grid: Duração e Predecessoras -->
         <div class="modal-grid-2">
           <div class="control-group">
             <label>Duração (dias)</label>
-            <input type="number" v-model.number="editingTask.duration" class="modal-input" min="0" />
+            <input type="number" v-model.number="editingTask.duration" class="modal-input" min="0" max="9999" :style="fieldErrors.duration ? 'border-color:var(--danger) !important;' : ''" />
+            <span v-if="fieldErrors.duration" style="color:var(--danger); font-size:11px; margin-top:2px; display:block;">{{ fieldErrors.duration }}</span>
           </div>
           <div class="control-group">
             <label>Predecessoras (IDs separados por vírgula)</label>
@@ -1136,11 +1146,13 @@ input[type="range"].modal-input {
           <div class="modal-grid-2" v-if="hasPlannedDates">
             <div class="control-group">
               <label>Início Planejado</label>
-              <input type="date" v-model="editingTask.plannedStart" class="modal-input" />
+              <input type="date" v-model="editingTask.plannedStart" class="modal-input" :style="fieldErrors.plannedStart ? 'border-color:var(--danger) !important;' : ''" />
+              <span v-if="fieldErrors.plannedStart" style="color:var(--danger); font-size:11px; margin-top:2px; display:block;">{{ fieldErrors.plannedStart }}</span>
             </div>
             <div class="control-group">
               <label>Fim Planejado</label>
-              <input type="date" v-model="editingTask.plannedEnd" class="modal-input" />
+              <input type="date" v-model="editingTask.plannedEnd" class="modal-input" :style="fieldErrors.plannedEnd ? 'border-color:var(--danger) !important;' : ''" />
+              <span v-if="fieldErrors.plannedEnd" style="color:var(--danger); font-size:11px; margin-top:2px; display:block;">{{ fieldErrors.plannedEnd }}</span>
             </div>
           </div>
           <div style="font-size:10px; color:var(--text2); line-height:1.4;" v-else>
@@ -1188,13 +1200,13 @@ input[type="range"].modal-input {
       <!-- Footer Buttons -->
       <div class="modal-footer" style="margin-top:20px; display:flex; justify-content:space-between; align-items:center; width:100%;">
         <div>
-          <button v-if="editingTask && tasks.some(t => t.id === editingTask.id)" class="btn" style="background: linear-gradient(135deg, #ff4757, #ff6b6b);" @click="deleteTask">
+          <button v-if="editingTask && tasks.some(t => t.id === editingTask.id)" class="btn" style="background: linear-gradient(135deg, #ff4757, #ff6b6b);" @click="deleteTask" :disabled="saving" :style="saving ? 'opacity:0.6; cursor:wait;' : ''">
             🗑️ Excluir
           </button>
         </div>
         <div style="display:flex; gap:10px;">
           <button class="btn-secondary" @click="closeEditModal">Cancelar</button>
-          <button class="btn" @click="saveTaskChanges">Salvar</button>
+          <button class="btn" @click="saveTaskChanges" :disabled="saving" :style="saving ? 'opacity:0.6; cursor:wait;' : ''">Salvar</button>
         </div>
       </div>
     </div>

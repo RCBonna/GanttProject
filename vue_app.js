@@ -174,6 +174,50 @@ async function loadHandleFromDB() {
   }
 }
 
+// CSV Field Mapping — centralized source of truth for D-05
+const CSV_WRITE_FIELDS = [
+  { key: 'id', label: 'ID' },
+  { key: 'task', label: 'Tarefa' },
+  { key: 'duration', label: 'Duracao' },
+  { key: 'percent', label: 'Progresso' },
+  { key: 'predecessor', label: 'Predecessora' },
+  { key: 'type', label: 'Tipo' },
+  { key: 'realStart', label: 'Data_Inicial_Real' },
+  { key: 'realEnd', label: 'Data_Final_Real' },
+  { key: 'plannedStart', label: 'Data_Inicial_Planejada' },
+  { key: 'plannedEnd', label: 'Data_Final_Planejada' },
+  { key: 'baselineStart', label: 'Data_Inicial_Baseline' },
+  { key: 'baselineEnd', label: 'Data_Final_Baseline' },
+  { key: 'baselineDate', label: 'Baseline_Data' }
+];
+
+// Backward-compatible CSV header aliases for reading (lowercase)
+const CSV_READ_ALIASES = {
+  task: ['tarefa', 'name'],
+  percent: ['progresso', 'concluido', 'percentagem'],
+  duration: ['dias', 'duracao'],
+  predecessor: ['predecessora'],
+  type: ['tipo'],
+  plannedStart: ['data_inicial_planejada', 'planned_start'],
+  plannedEnd: ['data_final_planejada', 'planned_end'],
+  realStart: ['data_inicial_real', 'actual_start', 'real_start'],
+  realEnd: ['data_final_real', 'actual_end', 'real_end'],
+  baselineStart: ['data_inicial_baseline', 'baseline_start'],
+  baselineEnd: ['data_final_baseline', 'baseline_end'],
+  baselineDate: ['baseline_data', 'baseline_date']
+};
+
+const mapCSVRow = (obj) => {
+  const out = {};
+  for (const [field, aliases] of Object.entries(CSV_READ_ALIASES)) {
+    const found = aliases.find(a => obj[a] !== undefined && obj[a] !== '');
+    out[field] = found ? obj[found] : obj[field] || '';
+  }
+  // Always include id if present
+  if (obj.id !== undefined) out.id = obj.id;
+  return out;
+};
+
 const App = {
   setup() {
     const hasFolder = ref(false);
@@ -228,6 +272,7 @@ const App = {
       }
     });
 
+    const saving = ref(false);
     const recalculateStatus = ref('');
     const hoverTaskId = ref(null);
 
@@ -250,6 +295,7 @@ const App = {
 
     // Temp variables for modals
     const editingTask = ref(null);
+    const fieldErrors = ref({});
     const hasPlannedDates = ref(false);
     const projectOptions = ref([]);
     const tempProjectMetadata = ref({ name: '', manager: '', startDate: '' });
@@ -284,6 +330,12 @@ const App = {
 
     const holidaysMap = ref({}); // { 'YYYY-MM-DD': 'Name' }
     const tasks = ref([]);
+    const filterText = ref('');
+    const filteredTasks = computed(() => {
+      if (!filterText.value) return tasks.value;
+      const q = filterText.value.toLowerCase();
+      return tasks.value.filter(t => (t.task || '').toLowerCase().includes(q) || String(t.id).includes(q));
+    });
     const allDays = ref([]);
     const chartColumns = ref([]);
     const chartMonths = ref([]);
@@ -427,9 +479,9 @@ const App = {
           return await file.text();
         } catch { return null; }
       }
-      // Fallback: read from localStorage
+      // Fallback: read from localStorage (decoded)
       try {
-        return localStorage.getItem('gantt_fs_' + filename);
+        return decodeCache(localStorage.getItem('gantt_fs_' + filename));
       } catch { return null; }
     };
 
@@ -459,7 +511,7 @@ const App = {
       const entries = Object.entries(files);
       if (entries.length === 0) return;
       entries.forEach(([name, content]) => {
-        localStorage.setItem('gantt_fs_' + name, content);
+        localStorage.setItem('gantt_fs_' + name, encodeCache(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
       });
@@ -482,7 +534,7 @@ const App = {
           console.warn('Failed to create backup for ' + filename, err);
         }
       } else {
-        localStorage.setItem('gantt_fs_' + bakName, existing);
+        localStorage.setItem('gantt_fs_' + bakName, encodeCache(existing));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(bakName)) { index.push(bakName); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
       }
@@ -504,9 +556,9 @@ const App = {
           return false;
         }
       }
-      // Fallback: save to localStorage
+      // Fallback: save to localStorage (encoded)
       try {
-        localStorage.setItem('gantt_fs_' + filename, content);
+        localStorage.setItem('gantt_fs_' + filename, encodeCache(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(filename)) {
           index.push(filename);
@@ -521,22 +573,16 @@ const App = {
 
     // Main Tasks Saver
     const saveTasksToDisk = async () => {
-      let csvContent = "ID;Tarefa;Duracao;Progresso;Predecessora;Tipo;Data_Inicial_Real;Data_Final_Real;Data_Inicial_Planejada;Data_Final_Planejada;Data_Inicial_Baseline;Data_Final_Baseline;Baseline_Data\n";
+      const headerRow = CSV_WRITE_FIELDS.map(f => f.label).join(';');
+      let csvContent = headerRow + '\n';
       tasks.value.forEach(t => {
-        const id = t.id;
-        const task = sanitizeCSV(t.task.replace(/"/g, '""'));
-        const duration = t.duration;
-        const percent = t.percent;
-        const pred = sanitizeCSV(t.predecessor || '');
-        const type = sanitizeCSV(t.type || 'FS');
-        const realStart = sanitizeCSV(t.actualStart || t.realStart || '');
-        const realEnd = sanitizeCSV(t.actualEnd || t.realEnd || '');
-        const plannedStart = sanitizeCSV(t.plannedStart || '');
-        const plannedEnd = sanitizeCSV(t.plannedEnd || '');
-        const baselineStart = sanitizeCSV(t.baselineStart || '');
-        const baselineEnd = sanitizeCSV(t.baselineEnd || '');
-        const baselineDate = sanitizeCSV(t.baselineDate || '');
-        csvContent += `${id};"${task}";${duration};${percent};"${pred}";"${type}";"${realStart}";"${realEnd}";"${plannedStart}";"${plannedEnd}";"${baselineStart}";"${baselineEnd}";"${baselineDate}"\n`;
+        const row = CSV_WRITE_FIELDS.map(f => {
+          const val = t[f.key];
+          if (f.key === 'id') return val;
+          if (f.key === 'duration' || f.key === 'percent') return val;
+          return sanitizeCSV(String(val ?? '').replace(/"/g, '""'));
+        });
+        csvContent += row.join(';') + '\n';
       });
       
       // Save local storage cache too
@@ -675,7 +721,7 @@ const App = {
 
               if (projectOptions.value.length > 0) {
                 // Check if there's a cached active project Name
-                const savedProjectName = localStorage.getItem('activeProjectName');
+                const savedProjectName = decodeCache(localStorage.getItem('activeProjectName'));
                 const found = projectOptions.value.find(p => p.name === savedProjectName);
                 if (found) {
                   projectMetadata.value = { ...found };
@@ -733,36 +779,26 @@ const App = {
         const rawTasks = parseCSV(tContent);
         let index = 1;
         const mappedTasks = rawTasks.map(obj => {
-          const taskId = parseInt(obj.id || obj.id) || index++;
-          const taskName = obj.task || obj.tarefa || obj.name || 'Tarefa ' + taskId;
-          const taskPercent = parseInt(obj.percent || obj.concluido || obj.percentagem || obj.progresso || 0);
-          const taskDuration = parseInt(obj.duration || obj.dias || obj.duracao || obj.duracao || 0);
-          const taskPred = obj.predecessor || obj.predecessora || '';
-          const taskType = obj.type || obj.tipo || 'FS';
-          const plannedStart = obj.data_inicial_planejada || obj.planned_start || '';
-          const plannedEnd = obj.data_final_planejada || obj.planned_end || '';
-          const realStartStr = obj.data_inicial_real || obj.actual_start || '';
-          const realEndStr = obj.data_final_real || obj.actual_end || '';
-          const baselineStart = obj.data_inicial_baseline || obj.baseline_start || '';
-          const baselineEnd = obj.data_final_baseline || obj.baseline_end || '';
-          const baselineDate = obj.baseline_data || obj.baseline_date || '';
+          const row = mapCSVRow(obj);
+          const taskId = parseInt(row.id) || index++;
+          const taskName = row.task || 'Tarefa ' + taskId;
+          const taskPercent = parseInt(row.percent) || 0;
+          const taskDuration = parseInt(row.duration) || 0;
 
           return {
             id: taskId,
             task: taskName,
-            percent: isNaN(taskPercent) ? 0 : taskPercent,
+            percent: isNaN(taskPercent) ? 0 : Math.max(0, Math.min(100, taskPercent)),
             duration: isNaN(taskDuration) ? 0 : taskDuration,
-            predecessor: taskPred,
-            type: taskType.toUpperCase(),
-            plannedStart: plannedStart,
-            plannedEnd: plannedEnd,
-            realStart: realStartStr || null,
-            realEnd: realEndStr || null,
-            actualStart: realStartStr || null,
-            actualEnd: realEndStr || null,
-            baselineStart: baselineStart || '',
-            baselineEnd: baselineEnd || '',
-            baselineDate: baselineDate || '',
+            predecessor: row.predecessor || '',
+            type: (row.type || 'FS').toUpperCase(),
+            plannedStart: row.plannedStart || '',
+            plannedEnd: row.plannedEnd || '',
+            realStart: row.realStart || null,
+            realEnd: row.realEnd || null,
+            baselineStart: row.baselineStart || '',
+            baselineEnd: row.baselineEnd || '',
+            baselineDate: row.baselineDate || '',
             start: null,
             end: null,
             selectedForBaseline: isNaN(taskPercent) || taskPercent < 100
@@ -784,7 +820,7 @@ const App = {
         manager: proj.manager,
         tasksFile: proj.tasksFile
       };
-      localStorage.setItem('activeProjectName', proj.name);
+      localStorage.setItem('activeProjectName', encodeCache(proj.name));
       localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
       showProjectSelector.value = false;
       await loadTasks();
@@ -839,8 +875,8 @@ const App = {
 
             resolve(pred, visited);
 
-            const predRealStart = parseDate(pred.actualStart || pred.realStart);
-            const predRealEnd = parseDate(pred.actualEnd || pred.realEnd);
+            const predRealStart = parseDate(pred.realStart);
+            const predRealEnd = parseDate(pred.realEnd);
 
             if (t.type === 'SS') {
               // Start-to-Start: successor starts when predecessor starts
@@ -1014,7 +1050,7 @@ const App = {
       const entries = Object.entries(files);
       if (entries.length === 0) return;
       entries.forEach(([name, content]) => {
-        localStorage.setItem('gantt_fs_' + name, content);
+        localStorage.setItem('gantt_fs_' + name, encodeCache(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
       });
@@ -1154,7 +1190,7 @@ const App = {
           manager: wizardManager.value.trim() || '',
           tasksFile: cleanName
         };
-        localStorage.setItem('activeProjectName', projectMetadata.value.name);
+        localStorage.setItem('activeProjectName', encodeCache(projectMetadata.value.name));
         localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
 
         const existingIdx = projectOptions.value.findIndex(p => p.tasksFile === cleanName);
@@ -1428,13 +1464,13 @@ const App = {
         link.download = `Gantt_${name}.png`;
         link.href = canvas.toDataURL('image/png');
         link.click();
-        addToast('success', 'Imagem HD (PNG) exportada com sucesso!');
+        addToast('Imagem HD (PNG) exportada com sucesso!', 'success');
       });
     };
 
     const exportPDF = () => {
       if (!window.jspdf || !window.jspdf.jsPDF) {
-        addToast('error', 'Biblioteca jsPDF não encontrada no sistema.');
+        addToast('Biblioteca jsPDF não encontrada no sistema.', 'error');
         return;
       }
       const { jsPDF } = window.jspdf;
@@ -1560,12 +1596,12 @@ const App = {
 
       const cleanName = projectMetadata.value.name.replace(/\s+/g, '_');
       doc.save(`Relatorio_Executivo_${cleanName}.pdf`);
-      addToast('success', 'Relatório Executivo PDF exportado com sucesso!');
+      addToast('Relatório Executivo PDF exportado com sucesso!', 'success');
     };
 
     const exportCSVReport = () => {
       if (!tasks.value.length) {
-        addToast('warn', 'Não há tarefas para exportar.');
+        addToast('Não há tarefas para exportar.', 'warn');
         return;
       }
       
@@ -1600,7 +1636,7 @@ const App = {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      addToast('success', 'Daily Status Report (CSV) exportado para Excel com sucesso!');
+      addToast('Daily Status Report (CSV) exportado para Excel com sucesso!', 'success');
     };
 
     // Detailed Premium Tooltips — supports 'planned', 'real', 'baseline'
@@ -1651,7 +1687,10 @@ const App = {
     };
 
     // Task Editing Modal Operations
+    const clearFieldErrors = () => { fieldErrors.value = {}; };
+
     const openEditModal = (task) => {
+      clearFieldErrors();
       // Create a clean deep copy
       editingTask.value = JSON.parse(JSON.stringify(task));
       editingTask.value.plannedStart = toInputDateFormat(editingTask.value.plannedStart);
@@ -1663,6 +1702,7 @@ const App = {
     };
 
     const closeEditModal = () => {
+      clearFieldErrors();
       editingTask.value = null;
       showEditModal.value = false;
     };
@@ -1692,44 +1732,67 @@ const App = {
     };
 
     const deleteTask = async () => {
-      if (!editingTask.value) return;
-      if (await showCustomConfirm(`Deseja realmente excluir a tarefa #${editingTask.value.id}?`, 'Excluir Tarefa', 'error')) {
-        tasks.value = tasks.value.filter(t => t.id !== editingTask.value.id);
-        calculateSchedule(tasks.value, projectMetadata.value.startDate);
-        buildTimeline();
-        await saveTasksToDisk();
-        closeEditModal();
+      if (!editingTask.value || saving.value) return;
+      saving.value = true;
+      try {
+        if (await showCustomConfirm(`Deseja realmente excluir a tarefa #${editingTask.value.id}?`, 'Excluir Tarefa', 'error')) {
+          tasks.value = tasks.value.filter(t => t.id !== editingTask.value.id);
+          calculateSchedule(tasks.value, projectMetadata.value.startDate);
+          buildTimeline();
+          await saveTasksToDisk();
+          closeEditModal();
+        }
+      } finally {
+        saving.value = false;
       }
     };
 
     const saveTaskChanges = async () => {
-      if (!editingTask.value) return;
-      const t = tasks.value.find(x => x.id === editingTask.value.id);
-      if (t) {
-        // Validate and sanitize inputs
-        t.task = (editingTask.value.task || '').trim().substring(0, 200);
-        if (!t.task) { showCustomAlert('O nome da tarefa é obrigatório.', 'Validação'); return; }
-        t.duration = Math.max(0, Math.min(9999, parseInt(editingTask.value.duration) || 0));
-        t.predecessor = (editingTask.value.predecessor || '').replace(/[^\d,\s]/g, '');
-        t.type = (editingTask.value.type === 'SS' ? 'SS' : 'FS');
-        t.percent = Math.max(0, Math.min(100, parseInt(editingTask.value.percent) || 0));
-
+      if (!editingTask.value || saving.value) return;
+      saving.value = true;
+      try {
+        const errors = {};
+        const taskName = (editingTask.value.task || '').trim().substring(0, 200);
+        if (!taskName) errors.task = 'O nome da tarefa é obrigatório.';
+        const duration = parseInt(editingTask.value.duration) || 0;
+        if (duration < 0) errors.duration = 'Duração não pode ser negativa.';
+        const percent = parseInt(editingTask.value.percent) || 0;
+        if (percent < 0 || percent > 100) errors.percent = 'Progresso deve estar entre 0 e 100.';
+        const predecessor = (editingTask.value.predecessor || '').replace(/[^\d,\s]/g, '');
         if (hasPlannedDates.value) {
-          t.plannedStart = editingTask.value.plannedStart;
-          t.plannedEnd = editingTask.value.plannedEnd;
-        } else {
-          t.plannedStart = '';
-          t.plannedEnd = '';
+          if (!editingTask.value.plannedStart) errors.plannedStart = 'Informe a data de início planejado.';
+          if (!editingTask.value.plannedEnd) errors.plannedEnd = 'Informe a data de fim planejado.';
         }
+        fieldErrors.value = errors;
+        if (Object.keys(errors).length > 0) { saving.value = false; return; }
 
-        t.realStart = editingTask.value.realStart;
-        t.realEnd = editingTask.value.realEnd;
+        const t = tasks.value.find(x => x.id === editingTask.value.id);
+        if (t) {
+          t.task = taskName;
+          t.duration = Math.max(0, Math.min(9999, duration));
+          t.predecessor = predecessor;
+          t.type = (editingTask.value.type === 'SS' ? 'SS' : 'FS');
+          t.percent = Math.max(0, Math.min(100, percent));
 
-        calculateSchedule(tasks.value, projectMetadata.value.startDate);
-        buildTimeline();
-        await saveTasksToDisk();
+          if (hasPlannedDates.value) {
+            t.plannedStart = editingTask.value.plannedStart;
+            t.plannedEnd = editingTask.value.plannedEnd;
+          } else {
+            t.plannedStart = '';
+            t.plannedEnd = '';
+          }
+
+          t.realStart = editingTask.value.realStart;
+          t.realEnd = editingTask.value.realEnd;
+
+          calculateSchedule(tasks.value, projectMetadata.value.startDate);
+          buildTimeline();
+          await saveTasksToDisk();
+        }
+        closeEditModal();
+      } finally {
+        saving.value = false;
       }
-      closeEditModal();
     };
 
     const addNewTask = () => {
@@ -1820,13 +1883,62 @@ const App = {
         console.warn('IndexedDB reconnection failed:', err);
         permissionStatus.value = 'prompt';
       }
+
+      // Keyboard Shortcuts
+      window.addEventListener('keydown', (e) => {
+        const anyModalOpen = showEditModal.value || showExportModal.value || showHolidaysModal.value || showProjectSelector.value || showProjectSettingsModal.value || showNewProjectWizard.value;
+        const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
+
+        if (e.key === 'Escape' && anyModalOpen) {
+          if (showEditModal.value) closeEditModal();
+          else if (showExportModal.value) showExportModal.value = false;
+          else if (showHolidaysModal.value) showHolidaysModal.value = false;
+          else if (showProjectSelector.value) showProjectSelector.value = false;
+          else if (showProjectSettingsModal.value) showProjectSettingsModal.value = false;
+          else if (showNewProjectWizard.value) showNewProjectWizard.value = false;
+          return;
+        }
+
+        if (e.key === 'Enter' && showEditModal.value && !e.shiftKey) {
+          if (!isInputFocused || document.activeElement?.type === 'number') {
+            saveTaskChanges();
+          }
+          return;
+        }
+
+        if (e.key === 'Delete' && showEditModal.value) {
+          deleteTask();
+          return;
+        }
+
+        if (isInputFocused) return;
+
+        if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+          if (hasFolder.value) addNewTask();
+          return;
+        }
+        if (e.key === 'b' && !e.ctrlKey && !e.metaKey) {
+          if (hasFolder.value) saveBaseline();
+          return;
+        }
+        if (e.key === 'e' && !e.ctrlKey && !e.metaKey) {
+          if (hasFolder.value) showExportModal.value = true;
+          return;
+        }
+        if (e.key === '/' && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          const fl = document.querySelector('input[placeholder*="Filtrar"]');
+          if (fl) fl.focus();
+          return;
+        }
+      });
     });
 
     return {
       hasFolder, directoryHandle, permissionStatus, zoomLevel, taskListWidth, hoverTaskId,
       projectMetadata, tasks, holidaysMap,
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
-      stats, donutBg, recalculateStatus,
+      stats, donutBg, recalculateStatus, saving,
       showBaselineBars, showRealBars, hasAnyBaseline,
       columnView, gridTemplate, minTaskListWidth, selectAllBaseline,
       
@@ -1836,8 +1948,8 @@ const App = {
       // Modals Control
       showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal, showNewProjectWizard,
       wizardStep, wizardName, wizardManager, wizardColor, wizardStartDate, wizardIncludeHolidays, wizardTemplate,
-      editingTask, hasPlannedDates, projectOptions, tempProjectMetadata,
-      newHolidayDate, newHolidayName, sortedHolidays, tooltip,
+      editingTask, fieldErrors, clearFieldErrors, hasPlannedDates, projectOptions, tempProjectMetadata,
+      newHolidayDate, newHolidayName, sortedHolidays, tooltip, filterText, filteredTasks,
 
       // Operations
       startNewProjectWizard, nextWizardStep, confirmCreateProject, openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
