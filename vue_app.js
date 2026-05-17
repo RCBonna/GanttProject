@@ -60,7 +60,8 @@ function getLocalISOString(d) {
 
 function sanitizeCSV(val) {
   if (typeof val !== 'string') return val;
-  if (/^[=+\-@|]/.test(val)) return "'" + val;
+  if (/^[=+\-@|\t]/.test(val)) return "'" + val;
+  if (/\r|\n/.test(val)) return val.replace(/\r?\n/g, ' ').replace(/\r/g, ' ');
   return val;
 }
 
@@ -71,13 +72,32 @@ function hasLocalStorageFiles() {
   } catch { return false; }
 }
 
+const CACHE_VERSION = 1;
+
+function clearAllCache() {
+  const keys = ['tasks', 'projectMetadata', 'projectOptions', 'holidaysMap', 'activeProjectName', 'hasFolder'];
+  keys.forEach(k => localStorage.removeItem(k));
+}
+
+function checkCacheVersion() {
+  const stored = localStorage.getItem('gantt_cache_version');
+  if (stored !== String(CACHE_VERSION)) {
+    clearAllCache();
+    localStorage.setItem('gantt_cache_version', String(CACHE_VERSION));
+  }
+}
+
 function encodeCache(data) {
-  try { return 'e:' + btoa(encodeURIComponent(JSON.stringify(data))); }
+  try { return 'v1:e:' + btoa(encodeURIComponent(JSON.stringify(data))); }
   catch { return JSON.stringify(data); }
 }
 
 function decodeCache(str) {
   if (!str || typeof str !== 'string') return null;
+  if (str.startsWith('v1:e:')) {
+    try { return JSON.parse(decodeURIComponent(atob(str.slice(5)))); }
+    catch { return null; }
+  }
   if (str.startsWith('e:')) {
     try { return JSON.parse(decodeURIComponent(atob(str.slice(2)))); }
     catch { return null; }
@@ -112,7 +132,8 @@ function formatDatePT(dateStr) {
     const year = dateStr.getFullYear();
     return `${day}/${month}/${year}`;
   }
-  const parts = dateStr.split('-');
+  const d = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+  const parts = d.split('-');
   if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
   return dateStr;
 }
@@ -224,6 +245,7 @@ const App = {
     const directoryHandle = ref(null);
     const permissionStatus = ref('prompt');
     const zoomLevel = ref('day');
+    let lastFocusedElement = null;
     
     // Custom Toasts and Dialogs State
     const toasts = ref([]);
@@ -283,8 +305,9 @@ const App = {
     const showEditModal = ref(false);
     const showExportModal = ref(false);
     const showNewProjectWizard = ref(false);
+    const showMoreMenu = ref(false);
 
-    // Wizard State
+    // Wizard State (existing project wizard)
     const wizardStep = ref(1);
     const wizardName = ref('');
     const wizardManager = ref('');
@@ -293,12 +316,58 @@ const App = {
     const wizardIncludeHolidays = ref(true);
     const wizardTemplate = ref('software');
 
+    // Portfolio Wizard State
+    const showPortfolioWizard = ref(false);
+
+    const anyModalOpen = computed(() =>
+      showEditModal.value || showExportModal.value || showHolidaysModal.value ||
+      showProjectSelector.value || showProjectSettingsModal.value ||
+      showNewProjectWizard.value || showPortfolioWizard.value
+    );
+
+    watch(anyModalOpen, (open) => {
+      if (open) {
+        lastFocusedElement = document.activeElement;
+        nextTick(() => {
+          const overlays = document.querySelectorAll('.modal-overlay');
+          for (const el of overlays) {
+            if (el.style.display === 'flex') {
+              const first = el.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+              if (first) first.focus();
+              break;
+            }
+          }
+        });
+      } else if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+        lastFocusedElement.focus();
+        lastFocusedElement = null;
+      }
+    });
+
+    const pfStep = ref(1);
+    const pfFolderHandle = ref(null);
+    const pfFolderPath = ref('');
+    const pfName = ref('');
+    const pfDescription = ref('');
+    const pfColor = ref('#0984e3');
+    const pfManager = ref('');
+    const pfBaseDate = ref(new Date().toISOString().split('T')[0]);
+    const pfIncludeHolidays = ref(true);
+    const pfHolidays = ref([]);
+    const pfNewHolidayDate = ref('');
+    const pfNewHolidayDesc = ref('');
+
+
     // Temp variables for modals
     const editingTask = ref(null);
     const fieldErrors = ref({});
     const hasPlannedDates = ref(false);
     const projectOptions = ref([]);
-    const tempProjectMetadata = ref({ name: '', manager: '', startDate: '' });
+    const portfolioMeta = ref(null);
+    const showPortfolioInfo = ref(false);
+    const showPortfolioEditModal = ref(false);
+    const tempPortfolioMeta = ref({ name: '', description: '', manager: '', baseDate: '', color: '#0984e3' });
+    const tempProjectMetadata = ref({ name: '', manager: '', startDate: '', color: '#6c5ce7' });
     const newHolidayDate = ref('');
     const newHolidayName = ref('');
 
@@ -336,6 +405,7 @@ const App = {
       const q = filterText.value.toLowerCase();
       return tasks.value.filter(t => (t.task || '').toLowerCase().includes(q) || String(t.id).includes(q));
     });
+
     const allDays = ref([]);
     const chartColumns = ref([]);
     const chartMonths = ref([]);
@@ -541,19 +611,24 @@ const App = {
     };
 
     // File System Access Save Handler with localStorage fallback
-    const saveFileToDisk = async (filename, content) => {
+    const saveFileToDisk = async (filename, content, retries = 1) => {
       await backupFile(filename);
       if (directoryHandle.value) {
-        try {
-          const handle = await directoryHandle.value.getFileHandle(filename, { create: true });
-          const writable = await handle.createWritable();
-          await writable.write('\ufeff' + content);
-          await writable.close();
-          return true;
-        } catch (err) {
-          console.error("Error writing to file " + filename, err);
-          addToast(`Erro ao salvar o arquivo ${filename} no disco. Certifique-se de que a pasta está conectada e possui permissões de escrita.`, 'error');
-          return false;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+          try {
+            const handle = await directoryHandle.value.getFileHandle(filename, { create: true });
+            const writable = await handle.createWritable();
+            await writable.write('\ufeff' + content);
+            await writable.close();
+            return true;
+          } catch (err) {
+            console.error(`Error writing to file ${filename} (attempt ${attempt + 1})`, err);
+            if (attempt < retries) {
+              await new Promise(r => setTimeout(r, 500));
+              continue;
+            }
+            addToast(`Falha ao salvar ${filename} no disco. Salvando localmente como fallback.`, 'warn');
+          }
         }
       }
       // Fallback: save to localStorage (encoded)
@@ -567,20 +642,24 @@ const App = {
         return true;
       } catch (err) {
         console.error("Error saving to localStorage fallback", err);
+        addToast(`Erro crítico ao salvar ${filename}. Verifique o espaço disponível no navegador.`, 'error');
         return false;
       }
     };
 
     // Main Tasks Saver
     const saveTasksToDisk = async () => {
+      const escapeCSV = (val) => {
+        const str = String(val ?? '');
+        if (/^[=+\-@|\t]/.test(str)) return `"'${str.replace(/"/g, '""')}"`;
+        return `"${str.replace(/"/g, '""')}"`;
+      };
       const headerRow = CSV_WRITE_FIELDS.map(f => f.label).join(';');
       let csvContent = headerRow + '\n';
       tasks.value.forEach(t => {
         const row = CSV_WRITE_FIELDS.map(f => {
           const val = t[f.key];
-          if (f.key === 'id') return val;
-          if (f.key === 'duration' || f.key === 'percent') return val;
-          return sanitizeCSV(String(val ?? '').replace(/"/g, '""'));
+          return escapeCSV(val);
         });
         csvContent += row.join(';') + '\n';
       });
@@ -620,13 +699,15 @@ const App = {
         projectOptions.value[idx].name = tempProjectMetadata.value.name;
         projectOptions.value[idx].manager = tempProjectMetadata.value.manager;
         projectOptions.value[idx].startDate = tempProjectMetadata.value.startDate;
+        projectOptions.value[idx].color = tempProjectMetadata.value.color;
       } else {
         const cleanName = sanitizeFilename(tempProjectMetadata.value.name || 'Novo Projeto');
         projectOptions.value.push({
           name: tempProjectMetadata.value.name,
           manager: tempProjectMetadata.value.manager,
           startDate: tempProjectMetadata.value.startDate,
-          tasksFile: cleanName
+          tasksFile: cleanName,
+          color: tempProjectMetadata.value.color || '#6c5ce7'
         });
         projectMetadata.value.tasksFile = cleanName;
       }
@@ -635,6 +716,7 @@ const App = {
       projectMetadata.value.name = tempProjectMetadata.value.name;
       projectMetadata.value.manager = tempProjectMetadata.value.manager;
       projectMetadata.value.startDate = tempProjectMetadata.value.startDate;
+      projectMetadata.value.color = tempProjectMetadata.value.color;
 
       // Update LocalStorage cache
       localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
@@ -655,9 +737,35 @@ const App = {
       tempProjectMetadata.value = {
         name: projectMetadata.value.name,
         manager: projectMetadata.value.manager,
-        startDate: projectMetadata.value.startDate
+        startDate: projectMetadata.value.startDate,
+        color: projectMetadata.value.color || '#6c5ce7'
       };
       showProjectSettingsModal.value = true;
+    };
+
+    const openPortfolioSettings = () => {
+      if (!portfolioMeta.value) return;
+      tempPortfolioMeta.value = {
+        name: portfolioMeta.value.name || '',
+        description: portfolioMeta.value.description || '',
+        manager: portfolioMeta.value.manager || '',
+        baseDate: portfolioMeta.value.baseDate || '',
+        color: portfolioMeta.value.color || '#0984e3'
+      };
+      showPortfolioEditModal.value = true;
+    };
+
+    const savePortfolioSettings = () => {
+      portfolioMeta.value = {
+        ...portfolioMeta.value,
+        name: tempPortfolioMeta.value.name,
+        description: tempPortfolioMeta.value.description,
+        manager: tempPortfolioMeta.value.manager,
+        baseDate: tempPortfolioMeta.value.baseDate,
+        color: tempPortfolioMeta.value.color
+      };
+      localStorage.setItem('portfolioMeta', encodeCache(portfolioMeta.value));
+      showPortfolioEditModal.value = false;
     };
 
     // Holidays Saver
@@ -710,12 +818,13 @@ const App = {
           try {
             const metaRows = JSON.parse(metadadosContent);
             if (Array.isArray(metaRows)) {
-              projectOptions.value = metaRows.map(m => ({
-                name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
-                startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
-                manager: m.manager || m.gerente || '',
-                tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv'
-              }));
+      projectOptions.value = metaRows.map(m => ({
+        name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
+        startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
+        manager: m.manager || m.gerente || '',
+        tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv',
+        color: m.color || '#6c5ce7'
+      }));
 
               localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
 
@@ -1060,6 +1169,44 @@ const App = {
       addToast(`📂 ${entries.length} arquivo(s) importado(s) via navegador. Use "Exportar" para salvar no disco.`, 'info', 5000);
     };
 
+    const closeProjectFolder = async () => {
+      if (tasks.value.length > 0) {
+        const confirmed = await showCustomConfirm(
+          'Deseja realmente fechar este projeto? Os dados não salvos serão perdidos.',
+          'Fechar Projeto',
+          'warn'
+        );
+        if (!confirmed) return;
+      }
+
+      // Wipe reactive state
+      tasks.value = [];
+      holidaysMap.value = {};
+      projectMetadata.value = { name: 'Nome do Projeto', startDate: new Date().toISOString().split('T')[0], manager: '', tasksFile: 'tarefas.csv' };
+      projectOptions.value = [];
+      directoryHandle.value = null;
+      hasFolder.value = false;
+      permissionStatus.value = 'prompt';
+      filterText.value = '';
+      allDays.value = [];
+      chartColumns.value = [];
+      chartMonths.value = [];
+
+      // Remove folder flag from localStorage
+      localStorage.removeItem('hasFolder');
+
+      // Clear IndexedDB handle
+      try {
+        const db = await getDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(KEY_NAME);
+      } catch (err) {
+        console.warn('IndexedDB handle delete failed', err);
+      }
+
+      addToast('🔌 Projeto fechado. Dados da sessão limpos.', 'info', 4000);
+    };
+
     const reconnectFolder = async () => {
       if (directoryHandle.value) {
         try {
@@ -1112,41 +1259,53 @@ const App = {
 
     const confirmCreateProject = async () => {
       try {
-        // Try File System API, fall back to localStorage
-        if ('showDirectoryPicker' in window) {
-          try {
-            directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
-            localStorage.setItem('hasFolder', 'true');
-            await saveHandleToDB(directoryHandle.value);
-            permissionStatus.value = 'granted';
-          } catch (err) {
-            if (err.name === 'AbortError') return;
-            console.warn('FileSystem API failed in wizard, using localStorage fallback');
+        // Only ask for folder if not already set (e.g. from portfolio wizard)
+        if (!directoryHandle.value) {
+          if ('showDirectoryPicker' in window) {
+            try {
+              directoryHandle.value = await window.showDirectoryPicker({ mode: 'readwrite' });
+              localStorage.setItem('hasFolder', 'true');
+              await saveHandleToDB(directoryHandle.value);
+              permissionStatus.value = 'granted';
+            } catch (err) {
+              if (err.name === 'AbortError') return;
+              console.warn('FileSystem API failed in wizard, using localStorage fallback');
+            }
           }
         }
         hasFolder.value = true;
         localStorage.setItem('hasFolder', 'true');
 
-        // 1. Configurar feriados se solicitado
-        if (wizardIncludeHolidays.value) {
-          const currYear = new Date(wizardStartDate.value).getFullYear();
-          const defaultHols = {
-            [`${currYear}-01-01`]: "Confraternização Universal (Ano Novo)",
-            [`${currYear}-04-21`]: "Tiradentes",
-            [`${currYear}-05-01`]: "Dia do Trabalho",
-            [`${currYear}-09-07`]: "Independência do Brasil",
-            [`${currYear}-10-12`]: "Nossa Senhora Aparecida",
-            [`${currYear}-11-02`]: "Finados",
-            [`${currYear}-11-15`]: "Proclamação da República",
-            [`${currYear}-12-25`]: "Natal"
-          };
-          holidaysMap.value = defaultHols;
-          localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
-          await saveFileToDisk('feriados.json', JSON.stringify(defaultHols, null, 2));
+        // 1. Configurar feriados se solicitado (only for standalone, not when portfolio already has holidays)
+        const existingPortfolio = await readFileFromDisk('portfolio.json');
+        if (!existingPortfolio) {
+          if (wizardIncludeHolidays.value) {
+            const currYear = new Date(wizardStartDate.value).getFullYear();
+            const defaultHols = {
+              [`${currYear}-01-01`]: "Confraternização Universal (Ano Novo)",
+              [`${currYear}-04-21`]: "Tiradentes",
+              [`${currYear}-05-01`]: "Dia do Trabalho",
+              [`${currYear}-09-07`]: "Independência do Brasil",
+              [`${currYear}-10-12`]: "Nossa Senhora Aparecida",
+              [`${currYear}-11-02`]: "Finados",
+              [`${currYear}-11-15`]: "Proclamação da República",
+              [`${currYear}-12-25`]: "Natal"
+            };
+            holidaysMap.value = defaultHols;
+            localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+            await saveFileToDisk('feriados.json', JSON.stringify(defaultHols, null, 2));
+          } else {
+            holidaysMap.value = {};
+            localStorage.setItem('holidaysMap', encodeCache({}));
+            await saveFileToDisk('feriados.json', JSON.stringify({}, null, 2));
+          }
         } else {
-          holidaysMap.value = {};
-          localStorage.setItem('holidaysMap', encodeCache({}));
-          await saveFileToDisk('feriados.json', JSON.stringify({}, null, 2));
+          // Load existing holidays if portfolio already exists
+          const hContent = await readFileFromDisk('feriados.json');
+          if (hContent) {
+            try { holidaysMap.value = JSON.parse(hContent); } catch {}
+            localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+          }
         }
 
         // 2. Configurar tarefas baseadas no template
@@ -1188,20 +1347,29 @@ const App = {
           name: wizardName.value.trim() || 'Novo Projeto',
           startDate: wizardStartDate.value,
           manager: wizardManager.value.trim() || '',
-          tasksFile: cleanName
+          tasksFile: cleanName,
+          color: wizardColor.value
         };
         localStorage.setItem('activeProjectName', encodeCache(projectMetadata.value.name));
         localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
 
-        const existingIdx = projectOptions.value.findIndex(p => p.tasksFile === cleanName);
-        if (existingIdx !== -1) {
-          projectOptions.value[existingIdx] = { ...projectMetadata.value };
-        } else {
-          projectOptions.value.push({ ...projectMetadata.value });
+        // Read existing portfolio.json, append project, save back
+        let portfolioProjects = [];
+        if (existingPortfolio) {
+          try {
+            const parsed = JSON.parse(existingPortfolio);
+            if (Array.isArray(parsed)) portfolioProjects = parsed;
+          } catch {}
         }
-        localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
-
-        await saveFileToDisk('portfolio.json', JSON.stringify(projectOptions.value, null, 2));
+        const existingIdx = portfolioProjects.findIndex(p => p.tasksFile === cleanName);
+        if (existingIdx !== -1) {
+          portfolioProjects[existingIdx] = { ...projectMetadata.value };
+        } else {
+          portfolioProjects.push({ ...projectMetadata.value });
+        }
+        projectOptions.value = portfolioProjects;
+        localStorage.setItem('projectOptions', encodeCache(portfolioProjects));
+        await saveFileToDisk('portfolio.json', JSON.stringify(portfolioProjects, null, 2));
 
         calculateSchedule(mappedInit, projectMetadata.value.startDate);
         tasks.value = mappedInit;
@@ -1214,6 +1382,171 @@ const App = {
       } catch (err) {
         console.error(err);
         addToast("A criação do projeto foi cancelada ou ocorreu um erro de permissão.", "warn");
+      }
+    };
+
+    // Portfolio Wizard Functions
+    const startPortfolioWizard = () => {
+      pfStep.value = 1;
+      pfFolderHandle.value = null;
+      pfFolderPath.value = '';
+      pfName.value = '';
+      pfDescription.value = '';
+      pfColor.value = '#0984e3';
+      pfManager.value = '';
+      pfBaseDate.value = new Date().toISOString().split('T')[0];
+      pfIncludeHolidays.value = true;
+      pfHolidays.value = [];
+      pfNewHolidayDate.value = '';
+      pfNewHolidayDesc.value = '';
+      showPortfolioWizard.value = true;
+    };
+
+    const selectPortfolioFolder = async () => {
+      if (!('showDirectoryPicker' in window)) {
+        addToast('Seu navegador não suporta seleção de pastas. Use o Chrome ou Edge.', 'error', 6000);
+        return;
+      }
+      try {
+        const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        // Check if folder is empty or has only portfolio.json / feriados.json
+        const entries = [];
+        for await (const entry of handle.values()) {
+          entries.push(entry.name);
+        }
+        const allowed = ['portfolio.json', 'feriados.json'];
+        const hasOther = entries.some(name => !allowed.includes(name));
+        if (entries.length > 0) {
+          if (hasOther) {
+            const proceed = await showCustomConfirm(
+              'A pasta não está vazia ou contém arquivos não reconhecidos. Deseja continuar?',
+              'Pasta não vazia',
+              'warn'
+            );
+            if (!proceed) return;
+          } else {
+            const proceed = await showCustomConfirm(
+              'Já existe um portfólio nesta pasta. Deseja sobrescrever?',
+              'Portfólio existente',
+              'warn'
+            );
+            if (!proceed) return;
+          }
+        }
+        pfFolderHandle.value = handle;
+        pfFolderPath.value = handle.name;
+        addToast('📁 Pasta selecionada com sucesso!', 'success');
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.error('Folder selection failed', err);
+        addToast('Erro ao selecionar a pasta. Verifique as permissões.', 'error');
+      }
+    };
+
+    const nextPortfolioStep = () => {
+      if (pfStep.value === 1) {
+        if (!pfFolderHandle.value) {
+          addToast("Selecione uma pasta antes de prosseguir.", "warn");
+          return;
+        }
+      } else if (pfStep.value === 2) {
+        if (!pfName.value.trim() || pfName.value.trim().length < 3) {
+          addToast("O nome do portfólio deve ter ao menos 3 caracteres.", "warn");
+          return;
+        }
+      } else if (pfStep.value === 3) {
+        if (!pfBaseDate.value) {
+          addToast("Informe a data base do portfólio.", "warn");
+          return;
+        }
+        if (pfNewHolidayDate.value && pfNewHolidayDesc.value.trim()) {
+          addPortfolioHoliday();
+        }
+      }
+      pfStep.value++;
+    };
+
+    const prevPortfolioStep = () => {
+      if (pfStep.value > 1) pfStep.value--;
+    };
+
+    const addPortfolioHoliday = () => {
+      const date = pfNewHolidayDate.value;
+      const name = pfNewHolidayDesc.value.trim();
+      if (!date || !name) {
+        addToast("Preencha a data e a descrição do feriado.", "warn");
+        return;
+      }
+      const baseYear = new Date(pfBaseDate.value).getFullYear();
+      const holidayYear = new Date(date).getFullYear();
+      if (holidayYear < baseYear) {
+        addToast("Feriado com data anterior ao ano base do portfólio.", "warn");
+        return;
+      }
+      pfHolidays.value.push({ date, name });
+      pfNewHolidayDate.value = '';
+      pfNewHolidayDesc.value = '';
+      addToast('➕ Feriado adicional adicionado!', 'success');
+    };
+
+    const removePortfolioHoliday = (idx) => {
+      pfHolidays.value.splice(idx, 1);
+    };
+
+    const confirmCreatePortfolio = async () => {
+      try {
+        // 1. Save handle to IndexedDB
+        if (pfFolderHandle.value) {
+          await saveHandleToDB(pfFolderHandle.value);
+          directoryHandle.value = pfFolderHandle.value;
+          localStorage.setItem('hasFolder', 'true');
+          hasFolder.value = true;
+          permissionStatus.value = 'granted';
+        }
+
+        // 2. Build holidays map
+        const baseYear = new Date(pfBaseDate.value).getFullYear();
+        const hols = {};
+        if (pfIncludeHolidays.value) {
+          hols[`${baseYear}-01-01`] = "Confraternização Universal (Ano Novo)";
+          hols[`${baseYear}-04-21`] = "Tiradentes";
+          hols[`${baseYear}-05-01`] = "Dia do Trabalho";
+          hols[`${baseYear}-09-07`] = "Independência do Brasil";
+          hols[`${baseYear}-10-12`] = "Nossa Senhora Aparecida";
+          hols[`${baseYear}-11-02`] = "Finados";
+          hols[`${baseYear}-11-15`] = "Proclamação da República";
+          hols[`${baseYear}-12-25`] = "Natal";
+        }
+        pfHolidays.value.forEach(h => {
+          hols[h.date] = h.name;
+        });
+        holidaysMap.value = hols;
+        localStorage.setItem('holidaysMap', encodeCache(hols));
+        await saveFileToDisk('feriados.json', JSON.stringify(hols, null, 2));
+
+        // 3. Save portfolio metadata to localStorage
+        const portfolioMeta = {
+          name: pfName.value.trim(),
+          description: pfDescription.value.trim(),
+          color: pfColor.value,
+          manager: pfManager.value.trim(),
+          baseDate: pfBaseDate.value,
+          createdAt: new Date().toISOString()
+        };
+        localStorage.setItem('portfolioMeta', encodeCache(portfolioMeta));
+
+        // 4. Create empty portfolio.json (backward-compatible array of projects)
+        projectOptions.value = [];
+        localStorage.setItem('projectOptions', encodeCache([]));
+        await saveFileToDisk('portfolio.json', JSON.stringify([], null, 2));
+
+        // 5. Close portfolio wizard and open project wizard
+        showPortfolioWizard.value = false;
+        addToast(`✅ Portfólio "${pfName.value}" criado com sucesso! Agora crie o primeiro projeto.`, 'success', 4000);
+        startNewProjectWizard();
+      } catch (err) {
+        console.error(err);
+        addToast("Erro ao criar o portfólio. Verifique as permissões da pasta.", "error");
       }
     };
 
@@ -1615,14 +1948,14 @@ const App = {
 
         return [
           t.id,
-          `"${t.task.replace(/"/g, '""')}"`,
+          `"${sanitizeCSV(t.task || '').replace(/"/g, '""')}"`,
           t.percent,
           t.start ? formatDatePT(t.start) : '',
           t.end ? formatDatePT(t.end) : '',
           t.duration,
           delay,
           statusStr,
-          `"${t.owner ? t.owner.replace(/"/g, '""') : ''}"`
+          `"${sanitizeCSV(t.owner || '').replace(/"/g, '""')}"`
         ].join(',');
       });
 
@@ -1835,6 +2168,7 @@ const App = {
 
     // Startup Cache Loader
     onMounted(async () => {
+      checkCacheVersion();
       // Always load cache first for immediate rendering (UX premium!)
       const cachedHasFolder = localStorage.getItem('hasFolder') === 'true';
       if (cachedHasFolder) {
@@ -1842,6 +2176,9 @@ const App = {
         try {
           const cachedMeta = decodeCache(localStorage.getItem('projectMetadata'));
           if (cachedMeta) projectMetadata.value = cachedMeta;
+
+          const cachedPortMeta = decodeCache(localStorage.getItem('portfolioMeta'));
+          if (cachedPortMeta) portfolioMeta.value = cachedPortMeta;
 
           const cachedOpts = decodeCache(localStorage.getItem('projectOptions'));
           if (cachedOpts) projectOptions.value = cachedOpts;
@@ -1886,16 +2223,45 @@ const App = {
 
       // Keyboard Shortcuts
       window.addEventListener('keydown', (e) => {
-        const anyModalOpen = showEditModal.value || showExportModal.value || showHolidaysModal.value || showProjectSelector.value || showProjectSettingsModal.value || showNewProjectWizard.value;
         const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
 
-        if (e.key === 'Escape' && anyModalOpen) {
+        if (e.key === 'Escape' && anyModalOpen.value) {
           if (showEditModal.value) closeEditModal();
           else if (showExportModal.value) showExportModal.value = false;
           else if (showHolidaysModal.value) showHolidaysModal.value = false;
           else if (showProjectSelector.value) showProjectSelector.value = false;
           else if (showProjectSettingsModal.value) showProjectSettingsModal.value = false;
           else if (showNewProjectWizard.value) showNewProjectWizard.value = false;
+          else if (showPortfolioWizard.value) showPortfolioWizard.value = false;
+          return;
+        }
+
+        if (e.key === 'Tab' && anyModalOpen.value) {
+          const overlays = document.querySelectorAll('.modal-overlay');
+          let modal = null;
+          for (const el of overlays) {
+            if (el.style.display === 'flex') { modal = el; break; }
+          }
+          if (modal) {
+            const focusable = modal.querySelectorAll('button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+            if (focusable.length === 0) {
+              e.preventDefault();
+              return;
+            }
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey) {
+              if (document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+              }
+            } else {
+              if (document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+              }
+            }
+          }
           return;
         }
 
@@ -1932,6 +2298,28 @@ const App = {
           return;
         }
       });
+
+      // Warn before page unload if project is open
+      window.addEventListener('beforeunload', (e) => {
+        if (hasFolder.value && tasks.value.length > 0) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      });
+
+      // Close ⚙️ dropdown and portfolio overlay on outside click
+      document.addEventListener('click', (e) => {
+        const wrap = document.querySelector('.more-wrap');
+        if (showMoreMenu.value && wrap && !wrap.contains(e.target)) {
+          showMoreMenu.value = false;
+        }
+        const pt = document.querySelector('.portfolio-trigger');
+        const po = document.querySelector('.portfolio-overlay');
+        if (showPortfolioInfo.value && pt && po && !pt.contains(e.target) && !po.contains(e.target)) {
+          showPortfolioInfo.value = false;
+        }
+      });
+
     });
 
     return {
@@ -1946,13 +2334,22 @@ const App = {
       toasts, customDialog, addToast, removeToast, showCustomAlert, showCustomConfirm,
 
       // Modals Control
-      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal, showNewProjectWizard,
+      showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal, showNewProjectWizard, showMoreMenu,
+      portfolioMeta, showPortfolioInfo, showPortfolioEditModal, tempPortfolioMeta,
+      openPortfolioSettings, savePortfolioSettings,
       wizardStep, wizardName, wizardManager, wizardColor, wizardStartDate, wizardIncludeHolidays, wizardTemplate,
+
+      // Portfolio Wizard
+      showPortfolioWizard, pfStep, pfFolderHandle, pfFolderPath, pfName, pfDescription, pfColor, pfManager,
+      pfBaseDate, pfIncludeHolidays, pfHolidays, pfNewHolidayDate, pfNewHolidayDesc,
       editingTask, fieldErrors, clearFieldErrors, hasPlannedDates, projectOptions, tempProjectMetadata,
       newHolidayDate, newHolidayName, sortedHolidays, tooltip, filterText, filteredTasks,
 
       // Operations
-      startNewProjectWizard, nextWizardStep, confirmCreateProject, openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
+      startNewProjectWizard, nextWizardStep, confirmCreateProject,
+      startPortfolioWizard, selectPortfolioFolder, nextPortfolioStep, prevPortfolioStep,
+      addPortfolioHoliday, removePortfolioHoliday, confirmCreatePortfolio,
+      closeProjectFolder, openProjectFolder, reconnectFolder, setZoom, selectProject, openProjectSettings, saveProjectSettings,
       addHoliday, removeHoliday, addNewTask, openEditModal, closeEditModal,
       saveTaskChanges, deleteTask, onProgressChange, getRealBarLeft, getRealBarWidthPx,
       getBarLeft, getMilestoneLeft, getBarWidthPx, getBarColor,
