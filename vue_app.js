@@ -1,4 +1,4 @@
-const { createApp, ref, computed, watch, onMounted, nextTick } = Vue;
+const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
 
 const BAR_COLORS = [
   'linear-gradient(135deg, #6c5ce7, #a29bfe)', // Roxo Premium
@@ -561,14 +561,17 @@ const App = {
         input.type = 'file';
         input.accept = '.csv,.json';
         input.multiple = true;
+        input.webkitdirectory = true;
         input.onchange = async () => {
           const files = input.files;
           if (!files || !files.length) { resolve({}); return; }
           const result = {};
           for (let i = 0; i < files.length; i++) {
-            try {
-              result[files[i].name] = await files[i].text();
-            } catch {}
+            if (files[i].name.endsWith('.csv') || files[i].name.endsWith('.json')) {
+              try {
+                result[files[i].name] = await files[i].text();
+              } catch {}
+            }
           }
           resolve(result);
         };
@@ -1404,7 +1407,10 @@ const App = {
 
     const selectPortfolioFolder = async () => {
       if (!('showDirectoryPicker' in window)) {
-        addToast('Seu navegador não suporta seleção de pastas. Use o Chrome ou Edge.', 'error', 6000);
+        addToast('Usando modo de fallback (armazenamento local). Lembre-se de exportar os arquivos.', 'info', 6000);
+        pfFolderHandle.value = { name: 'Armazenamento Local', fallback: true };
+        pfFolderPath.value = 'Armazenamento Local';
+        addToast('📁 Pasta virtual selecionada com sucesso!', 'success');
         return;
       }
       try {
@@ -1497,8 +1503,12 @@ const App = {
       try {
         // 1. Save handle to IndexedDB
         if (pfFolderHandle.value) {
-          await saveHandleToDB(pfFolderHandle.value);
-          directoryHandle.value = pfFolderHandle.value;
+          if (!pfFolderHandle.value.fallback) {
+            await saveHandleToDB(pfFolderHandle.value);
+            directoryHandle.value = pfFolderHandle.value;
+          } else {
+            directoryHandle.value = null;
+          }
           localStorage.setItem('hasFolder', 'true');
           hasFolder.value = true;
           permissionStatus.value = 'granted';
@@ -1737,23 +1747,32 @@ const App = {
       document.body.style.userSelect = 'none';
     };
 
+    const handleResizeMouseMove = (e) => {
+      if (!isResizing) return;
+      const tlElement = document.getElementById('taskList');
+      if (tlElement) {
+        const offset = tlElement.getBoundingClientRect().left;
+        const newW = e.clientX - offset;
+        if (newW > 150 && newW < 800) taskListWidth.value = newW;
+      }
+    };
+
+    const handleResizeMouseUp = () => {
+      if (isResizing) {
+        isResizing = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+
     onMounted(() => {
-      window.addEventListener('mousemove', e => {
-        if (!isResizing) return;
-        const tlElement = document.getElementById('taskList');
-        if (tlElement) {
-          const offset = tlElement.getBoundingClientRect().left;
-          const newW = e.clientX - offset;
-          if (newW > 150 && newW < 800) taskListWidth.value = newW;
-        }
-      });
-      window.addEventListener('mouseup', () => {
-        if (isResizing) {
-          isResizing = false;
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-        }
-      });
+      window.addEventListener('mousemove', handleResizeMouseMove);
+      window.addEventListener('mouseup', handleResizeMouseUp);
+    });
+
+    onUnmounted(() => {
+      window.removeEventListener('mousemove', handleResizeMouseMove);
+      window.removeEventListener('mouseup', handleResizeMouseUp);
     });
 
     const syncScroll = (e) => {
@@ -2222,7 +2241,7 @@ const App = {
       }
 
       // Keyboard Shortcuts
-      window.addEventListener('keydown', (e) => {
+      const handleGlobalKeydown = (e) => {
         const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
 
         if (e.key === 'Escape' && anyModalOpen.value) {
@@ -2297,18 +2316,18 @@ const App = {
           if (fl) fl.focus();
           return;
         }
-      });
+      };
 
       // Warn before page unload if project is open
-      window.addEventListener('beforeunload', (e) => {
+      const handleBeforeUnload = (e) => {
         if (hasFolder.value && tasks.value.length > 0) {
           e.preventDefault();
           e.returnValue = '';
         }
-      });
+      };
 
       // Close ⚙️ dropdown and portfolio overlay on outside click
-      document.addEventListener('click', (e) => {
+      const handleDocumentClick = (e) => {
         const wrap = document.querySelector('.more-wrap');
         if (showMoreMenu.value && wrap && !wrap.contains(e.target)) {
           showMoreMenu.value = false;
@@ -2318,8 +2337,17 @@ const App = {
         if (showPortfolioInfo.value && pt && po && !pt.contains(e.target) && !po.contains(e.target)) {
           showPortfolioInfo.value = false;
         }
-      });
+      };
 
+      window.addEventListener('keydown', handleGlobalKeydown);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.addEventListener('click', handleDocumentClick);
+
+      onUnmounted(() => {
+        window.removeEventListener('keydown', handleGlobalKeydown);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        document.removeEventListener('click', handleDocumentClick);
+      });
     });
 
     return {

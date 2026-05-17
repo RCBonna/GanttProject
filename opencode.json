@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "auto",
+  "skills": {
+    "paths": [
+      "C:/Users/rcbon/.gemini/antigravity/skills/",
+      "C:/Users/rcbon/.gemini/antigravity/skills/uxui-principles"
+    ]
+  }
+}
