@@ -3,13 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' blob: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' blob: data:;">
 <title>Gantt Chart - Vue 3 Local-First</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" integrity="sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H" crossorigin="anonymous"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/vue@3.5.32/dist/vue.global.prod.js" integrity="sha384-KJc/o84o7BBU7srqNt8sDU6NDIebjEJiXtBLGOr5uvulzxs77I6XcZyIKUofpgL+" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="app" v-cloak>
@@ -305,7 +302,7 @@
 
   <div class="empty-state" v-else>
     <h2>Nenhum projeto carregado</h2>
-    <p>Clique no botão acima para selecionar a pasta do seu projeto contendo os arquivos de configuração (portfolio.json, feriados.json) e planilhas de tarefas.</p>
+    <p>Selecione uma pasta com portfolio.json e feriados.json para abrir um portfólio existente, ou escolha uma pasta vazia para iniciar um novo portfólio.</p>
     <button class="btn-cta" @click="openProjectFolder"><span aria-hidden="true">📂</span> Selecionar Pasta</button>
   </div>
 
@@ -1027,6 +1024,6 @@
 
 </div>
 
-<script src="./vue_app.js"></script>
+<script type="module" src="./vue_app.js"></script>
 </body>
 </html>

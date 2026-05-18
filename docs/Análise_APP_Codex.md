@@ -1050,13 +1050,15 @@ Nível do projeto: Pleno.
 
 ### Correções imediatas P0
 
-| Item | Ação | Critério de aceite |
-|---|---|---|
-| Atualizar `jspdf` | Migrar para versão corrigida ou substituir gerador PDF | `npm audit` sem critical/high |
-| Resolver build | Converter `vue_app.js` para módulo ou app Vite real | Build sem alerta, JS bundlado |
-| Remover senha do localStorage | Passphrase em memória por sessão | Dados não descriptografam sem usuário informar senha |
-| Remover `unsafe-eval` | Bundlar dependências e ajustar CSP | CSP sem `unsafe-eval` |
-| Remover logs debug | Logger com ambiente | Sem metadados de arquivo em console prod |
+| Item | Ação | Critério de aceite | Status em 18/05/2026 |
+|---|---|---|---|
+| Atualizar `jspdf` | Migrar para versão corrigida ou substituir gerador PDF | `npm audit` sem critical/high | Concluído: `jspdf@4.2.1`, `npm audit` com 0 vulnerabilidades |
+| Resolver build | Converter `vue_app.js` para módulo ou app Vite real | Build sem alerta, JS bundlado | Concluído: `vue_app.js` agora é `type="module"` e Vite bundla a aplicação |
+| Remover senha do localStorage | Passphrase em memória por sessão | Dados não descriptografam sem usuário informar senha | Concluído: senha removida do `localStorage`; passphrase fica em memória da sessão |
+| Remover `unsafe-eval` | Bundlar dependências e ajustar CSP | CSP sem `unsafe-eval` | Reaberto: o app usa template Vue dentro do `index.html`; para manter a aplicação funcionando com Vue compiler no navegador, `unsafe-eval` voltou temporariamente. Correção definitiva exige pré-compilar a UI em SFC/render function |
+| Remover logs debug | Logger com ambiente | Sem metadados de arquivo em console prod | Concluído: removidos logs de diagnóstico de leitura/carregamento |
+
+Validação do P0: `npm test` aprovado com 51/51 testes, `npm run build` aprovado e `npm audit --audit-level=moderate` sem vulnerabilidades. Em seguida foi identificado que a importação ESM padrão de `vue` era runtime-only e não compilava o template existente em `index.html`; a recuperação foi feita importando `vue/dist/vue.esm-bundler.js` e restaurando `unsafe-eval` temporariamente.
 
 ### Prioridades P1
 
@@ -1211,4 +1213,3 @@ Recomendação de ranking geral:
 Score final do produto: 5.7/10.  
 Nível do projeto: Pleno.  
 Próximo nível viável: Sênior após corrigir P0/P1, modularizar e implantar CI/E2E.
-

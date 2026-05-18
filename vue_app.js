@@ -1,4 +1,4 @@
-const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
+import { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue/dist/vue.esm-bundler.js';
 
 // ─── Color Validation ─────────────────────────────────────────────────────
 
@@ -110,6 +110,7 @@ function clearAllCache() {
 }
 
 function checkCacheVersion() {
+  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
   const stored = localStorage.getItem('gantt_cache_version');
   if (stored !== String(CACHE_VERSION)) {
     clearAllCache();
@@ -122,7 +123,8 @@ function checkCacheVersion() {
 // ============================================================
 
 const CACHE_ENCRYPTION_KEY = 'gantt_encryption_enabled';
-const CACHE_ENCRYPTION_SALT = 'gantt_encryption_salt';
+const CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY = 'gantt_encryption_salt';
+let cacheEncryptionPassword = null;
 
 async function cryptoDeriveKey(password, salt) {
   const enc = new TextEncoder();
@@ -164,17 +166,28 @@ function isEncryptionEnabled() {
 }
 
 function enableEncryption(password) {
+  cacheEncryptionPassword = password || null;
   localStorage.setItem(CACHE_ENCRYPTION_KEY, 'true');
-  localStorage.setItem(CACHE_ENCRYPTION_SALT, password);
+  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
 }
 
 function disableEncryption() {
+  cacheEncryptionPassword = null;
   localStorage.removeItem(CACHE_ENCRYPTION_KEY);
-  localStorage.removeItem(CACHE_ENCRYPTION_SALT);
+  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
 }
 
 function getEncryptionPassword() {
-  return localStorage.getItem(CACHE_ENCRYPTION_SALT);
+  return cacheEncryptionPassword;
+}
+
+function requestEncryptionPassword() {
+  if (cacheEncryptionPassword) return cacheEncryptionPassword;
+  if (localStorage.getItem(CACHE_ENCRYPTION_KEY) !== 'true') return null;
+  const password = window.prompt('Informe a senha do cache criptografado para esta sessão. A senha não será salva no navegador.');
+  cacheEncryptionPassword = password || null;
+  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
+  return cacheEncryptionPassword;
 }
 
 async function encodeCacheEncrypted(data) {
@@ -193,7 +206,7 @@ async function encodeCacheEncrypted(data) {
 async function decodeCacheEncrypted(str) {
   if (!str || typeof str !== 'string') return null;
   if (str.startsWith('v2:enc:')) {
-    const password = getEncryptionPassword();
+    const password = requestEncryptionPassword();
     if (!password) return null;
     try {
       const decrypted = await cryptoDecrypt(str.slice(7), password);
@@ -332,6 +345,17 @@ const CSV_WRITE_FIELDS = [
   { key: 'baselineEnd', label: 'Data_Final_Baseline' },
   { key: 'baselineDate', label: 'Baseline_Data' }
 ];
+
+function normalizePortfolioProjects(metaRows) {
+  if (!Array.isArray(metaRows)) return [];
+  return metaRows.map(m => ({
+    name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
+    startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
+    manager: m.manager || m.gerente || '',
+    tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv',
+    color: safeColor(m.color, '#6c5ce7')
+  }));
+}
 
 // Backward-compatible CSV header aliases for reading (lowercase)
 const CSV_READ_ALIASES = {
@@ -664,16 +688,12 @@ const App = {
     // Read file from FileSystem API or localStorage fallback
     const readFileFromDisk = async (filename) => {
       const safe = sanitizeFilename(filename);
-      console.log('[readFileFromDisk] filename:', filename, 'sanitized:', safe);
       if (!safe) { console.warn(`Blocked read of file with invalid extension: ${filename}`); return null; }
       if (directoryHandle.value) {
-        console.log('[readFileFromDisk] using directoryHandle, name:', directoryHandle.value.name);
         try {
           const handle = await directoryHandle.value.getFileHandle(safe);
           const file = await handle.getFile();
-          console.log('[readFileFromDisk] file size:', file.size);
           const text = await file.text();
-          console.log('[readFileFromDisk] text length:', text.length);
           return text;
         } catch (e) {
           console.error('[readFileFromDisk] error:', e);
@@ -950,40 +970,34 @@ const App = {
 
     const loadProject = async () => {
       if (!directoryHandle.value && !hasLocalStorageFiles()) return;
-      console.log('[loadProject] directoryHandle:', !!directoryHandle.value, 'hasLocalStorageFiles:', hasLocalStorageFiles());
       try {
         // 1. Read portfolio.json
         let metadadosContent = await readFileFromDisk('portfolio.json');
-        console.log('[loadProject] portfolio.json length:', metadadosContent ? metadadosContent.length : 'null');
 
         if (metadadosContent) {
           try {
             const metaRows = JSON.parse(metadadosContent);
-            if (Array.isArray(metaRows)) {
-      projectOptions.value = metaRows.map(m => ({
-        name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
-        startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
-        manager: m.manager || m.gerente || '',
-        tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv',
-        color: safeColor(m.color, '#6c5ce7')
-      }));
+            projectOptions.value = normalizePortfolioProjects(metaRows);
 
-               localStorage.setItem('projectOptions', await encodeCacheEncrypted(projectOptions.value));
+            localStorage.setItem('projectOptions', await encodeCacheEncrypted(projectOptions.value));
 
-                if (projectOptions.value.length > 0) {
-                  // Check if there's a cached active project Name
-                  const savedProjectName = await decodeCacheEncrypted(localStorage.getItem('activeProjectName'));
-                  console.log('[loadProject] savedProjectName:', savedProjectName);
-                  const found = projectOptions.value.find(p => p.name === savedProjectName);
-                  if (found) {
-                    projectMetadata.value = { ...found };
-                    console.log('[loadProject] found project, tasksFile:', found.tasksFile);
-                  } else {
-                    projectMetadata.value = { ...projectOptions.value[0] };
-                    console.log('[loadProject] using first project, tasksFile:', projectOptions.value[0].tasksFile);
-                  }
-                  localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
-                }
+            if (projectOptions.value.length === 1) {
+              projectMetadata.value = { ...projectOptions.value[0] };
+              localStorage.setItem('activeProjectName', await encodeCacheEncrypted(projectMetadata.value.name));
+              localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
+              showProjectSelector.value = false;
+            } else if (projectOptions.value.length > 1) {
+              const savedProjectName = await decodeCacheEncrypted(localStorage.getItem('activeProjectName'));
+              const found = projectOptions.value.find(p => p.name === savedProjectName);
+              if (found && tasks.value.length > 0) {
+                projectMetadata.value = { ...found };
+                localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
+              }
+              tasks.value = [];
+              showProjectSelector.value = true;
+            } else {
+              tasks.value = [];
+              showProjectSelector.value = false;
             }
           } catch (e) {
             console.error("Erro ao analisar portfolio.json", e);
@@ -993,8 +1007,12 @@ const App = {
         // 2. Read feriados.json
         await loadHolidays();
 
-        // 3. Read tasks
-        await loadTasks();
+        // 3. Read tasks or ask the user to select a project
+        if (projectOptions.value.length === 1 || (projectOptions.value.length > 1 && !showProjectSelector.value)) {
+          await loadTasks();
+        } else if (projectOptions.value.length > 1) {
+          addToast('Selecione o projeto que deseja abrir neste portfólio.', 'info', 5000);
+        }
 
       } catch (err) {
         console.error("Error loading project files", err);
@@ -1027,9 +1045,7 @@ const App = {
 
     const loadTasks = async () => {
       if (!directoryHandle.value && !hasLocalStorageFiles()) return;
-      console.log('[loadTasks] tasksFile:', projectMetadata.value.tasksFile);
       let tContent = await readFileFromDisk(projectMetadata.value.tasksFile);
-      console.log('[loadTasks] content length:', tContent ? tContent.length : 'null');
 
       if (tContent) {
         const rawTasks = parseCSV(tContent);
@@ -1069,12 +1085,83 @@ const App = {
       }
     };
 
+    const resetPendingFolderSelection = async () => {
+      directoryHandle.value = null;
+      hasFolder.value = false;
+      permissionStatus.value = 'prompt';
+      localStorage.removeItem('hasFolder');
+      try {
+        const db = await getDB();
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        tx.objectStore(STORE_NAME).delete(KEY_NAME);
+      } catch (err) {
+        console.warn('IndexedDB handle delete failed', err);
+      }
+    };
+
+    const handleSelectedFolderManifest = async () => {
+      const portfolioContent = await readFileFromDisk('portfolio.json');
+      const holidaysContent = await readFileFromDisk('feriados.json');
+
+      if (!portfolioContent && !holidaysContent) {
+        const proceed = await showCustomConfirm(
+          'A pasta selecionada não possui portfolio.json nem feriados.json. Isso indica que ainda não há nenhum projeto registrado neste portfólio. Deseja seguir em frente e criar um novo portfólio nesta pasta?',
+          'Criar novo portfólio?',
+          'info'
+        );
+        if (!proceed) {
+          await resetPendingFolderSelection();
+          return false;
+        }
+        startPortfolioWizard({ handle: directoryHandle.value, path: directoryHandle.value?.name || 'Pasta selecionada' });
+        return false;
+      }
+
+      if (!portfolioContent || !holidaysContent) {
+        addToast('A pasta precisa conter portfolio.json e feriados.json para abrir um portfólio existente.', 'error', 6000);
+        await resetPendingFolderSelection();
+        return false;
+      }
+
+      let projects = [];
+      try {
+        projects = normalizePortfolioProjects(JSON.parse(portfolioContent));
+      } catch (err) {
+        console.error('Erro ao analisar portfolio.json', err);
+        addToast('Não foi possível ler o portfolio.json. Verifique se o arquivo está em JSON válido.', 'error', 6000);
+        await resetPendingFolderSelection();
+        return false;
+      }
+
+      if (projects.length === 0) {
+        const proceed = await showCustomConfirm(
+          'O arquivo portfolio.json existe, mas não possui nenhum projeto registrado. Deseja criar o primeiro projeto deste portfólio?',
+          'Portfólio sem projetos',
+          'info'
+        );
+        if (!proceed) {
+          await resetPendingFolderSelection();
+          return false;
+        }
+        projectOptions.value = [];
+        localStorage.setItem('projectOptions', await encodeCacheEncrypted([]));
+        await loadHolidays();
+        startNewProjectWizard();
+        return false;
+      }
+
+      projectOptions.value = projects;
+      localStorage.setItem('projectOptions', await encodeCacheEncrypted(projects));
+      return true;
+    };
+
     const selectProject = async (proj) => {
       projectMetadata.value = {
         name: proj.name,
         startDate: proj.startDate,
         manager: proj.manager,
-        tasksFile: proj.tasksFile
+        tasksFile: proj.tasksFile,
+        color: safeColor(proj.color)
       };
       localStorage.setItem('activeProjectName', await encodeCacheEncrypted(proj.name));
       localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
@@ -1294,6 +1381,8 @@ const App = {
           localStorage.setItem('hasFolder', 'true');
           await saveHandleToDB(directoryHandle.value);
           permissionStatus.value = 'granted';
+          const shouldLoadProject = await handleSelectedFolderManifest();
+          if (!shouldLoadProject) return;
           await loadProject();
           return;
         } catch (err) {
@@ -1312,6 +1401,8 @@ const App = {
       }
       hasFolder.value = true;
       localStorage.setItem('hasFolder', 'true');
+      const shouldLoadProject = await handleSelectedFolderManifest();
+      if (!shouldLoadProject) return;
       await loadProject();
       addToast(`📂 ${entries.length} arquivo(s) importado(s) via navegador. Use "Exportar" para salvar no disco.`, 'info', 5000);
     };
@@ -1533,7 +1624,7 @@ const App = {
     };
 
     // Portfolio Wizard Functions
-    const startPortfolioWizard = () => {
+    const startPortfolioWizard = (selectedFolder = null) => {
       pfStep.value = 1;
       pfFolderHandle.value = null;
       pfFolderPath.value = '';
@@ -1546,6 +1637,10 @@ const App = {
       pfHolidays.value = [];
       pfNewHolidayDate.value = '';
       pfNewHolidayDesc.value = '';
+      if (selectedFolder?.handle) {
+        pfFolderHandle.value = selectedFolder.handle;
+        pfFolderPath.value = selectedFolder.path || selectedFolder.handle.name || 'Pasta selecionada';
+      }
       showPortfolioWizard.value = true;
     };
 
@@ -1949,10 +2044,11 @@ const App = {
       else addToast('Nenhum arquivo de projeto encontrado para exportar.', 'warn');
     };
 
-    const exportPNG = () => {
+    const exportPNG = async () => {
       const chart = document.getElementById('ganttWrapper');
       if (!chart) return;
       const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+      const { default: html2canvas } = await import('html2canvas');
       html2canvas(chart, { backgroundColor: bgColor, scale: 2, logging: false }).then(canvas => {
         const link = document.createElement('a');
         const name = projectMetadata.value.name.replace(/\s+/g, '_');
@@ -1963,12 +2059,12 @@ const App = {
       });
     };
 
-    const exportPDF = () => {
-      if (!window.jspdf || !window.jspdf.jsPDF) {
+    const exportPDF = async () => {
+      const { jsPDF } = await import('jspdf');
+      if (!jsPDF) {
         addToast('Biblioteca jsPDF não encontrada no sistema.', 'error');
         return;
       }
-      const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       
       // Cores do tema
