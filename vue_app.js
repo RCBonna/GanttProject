@@ -1,5 +1,35 @@
 const { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } = Vue;
 
+// ─── Color Validation ─────────────────────────────────────────────────────
+
+const VALID_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+const SAFE_FALLBACK_COLOR = '#6c5ce7';
+
+function isValidColor(val) {
+  return typeof val === 'string' && VALID_HEX_COLOR.test(val);
+}
+
+function safeColor(val, fallback = SAFE_FALLBACK_COLOR) {
+  return isValidColor(val) ? val : fallback;
+}
+
+// ─── File Extension Validation ────────────────────────────────────────────
+
+const ALLOWED_EXTENSIONS = new Set(['.json', '.csv', '.bak']);
+
+function isValidProjectFile(filename) {
+  if (!filename || typeof filename !== 'string') return false;
+  const lower = filename.toLowerCase();
+  return Array.from(ALLOWED_EXTENSIONS).some(ext => lower.endsWith(ext));
+}
+
+function sanitizeFilename(filename) {
+  if (!isValidProjectFile(filename)) {
+    return null;
+  }
+  return filename.replace(/[/\\:*?"<>|]/g, '_').trim();
+}
+
 const BAR_COLORS = [
   'linear-gradient(135deg, #6c5ce7, #a29bfe)', // Roxo Premium
   'linear-gradient(135deg, #00cec9, #74b9ff)', // Turquesa / Azul Claro
@@ -87,6 +117,97 @@ function checkCacheVersion() {
   }
 }
 
+// ============================================================
+// Web Crypto API — Optional AES-GCM encryption for LocalStorage
+// ============================================================
+
+const CACHE_ENCRYPTION_KEY = 'gantt_encryption_enabled';
+const CACHE_ENCRYPTION_SALT = 'gantt_encryption_salt';
+
+async function cryptoDeriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function cryptoEncrypt(plaintext, password) {
+  const enc = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await cryptoDeriveKey(password, salt);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plaintext));
+  const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+  combined.set(salt, 0);
+  combined.set(iv, salt.length);
+  combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+  return btoa(String.fromCharCode(...combined));
+}
+
+async function cryptoDecrypt(b64data, password) {
+  const combined = Uint8Array.from(atob(b64data), c => c.charCodeAt(0));
+  const salt = combined.slice(0, 16);
+  const iv = combined.slice(16, 28);
+  const ciphertext = combined.slice(28);
+  const key = await cryptoDeriveKey(password, salt);
+  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  return new TextDecoder().decode(plaintext);
+}
+
+function isEncryptionEnabled() {
+  return localStorage.getItem(CACHE_ENCRYPTION_KEY) === 'true';
+}
+
+function enableEncryption(password) {
+  localStorage.setItem(CACHE_ENCRYPTION_KEY, 'true');
+  localStorage.setItem(CACHE_ENCRYPTION_SALT, password);
+}
+
+function disableEncryption() {
+  localStorage.removeItem(CACHE_ENCRYPTION_KEY);
+  localStorage.removeItem(CACHE_ENCRYPTION_SALT);
+}
+
+function getEncryptionPassword() {
+  return localStorage.getItem(CACHE_ENCRYPTION_SALT);
+}
+
+async function encodeCacheEncrypted(data) {
+  const password = getEncryptionPassword();
+  if (!password) return encodeCache(data);
+  try {
+    const json = JSON.stringify(data);
+    const encrypted = await cryptoEncrypt(json, password);
+    return 'v2:enc:' + encrypted;
+  } catch (e) {
+    console.error('Encryption failed, falling back to base64:', e);
+    return encodeCache(data);
+  }
+}
+
+async function decodeCacheEncrypted(str) {
+  if (!str || typeof str !== 'string') return null;
+  if (str.startsWith('v2:enc:')) {
+    const password = getEncryptionPassword();
+    if (!password) return null;
+    try {
+      const decrypted = await cryptoDecrypt(str.slice(7), password);
+      return JSON.parse(decrypted);
+    } catch (e) {
+      console.error('Decryption failed (wrong password or corrupted data):', e);
+      return null;
+    }
+  }
+  // Fall back to v1:e: format for backward compatibility
+  return decodeCache(str);
+}
+
+// Keep original functions for backward compatibility
 function encodeCache(data) {
   try { return 'v1:e:' + btoa(encodeURIComponent(JSON.stringify(data))); }
   catch { return JSON.stringify(data); }
@@ -420,9 +541,9 @@ const App = {
       if (!name) return 'tarefas.csv';
       return name.normalize("NFD")
                  .replace(/[\u0300-\u036f]/g, "")
-                 .replace(/[^a-zA-Z0-9_\- ]/g, "")
+                 .replace(/[^a-zA-Z0-9_\-\. ]/g, "")
                  .trim()
-                 .replace(/\s+/g, "_") + ".csv";
+                 .replace(/\s+/g, "_");
     };
 
     const addToast = (message, type = 'info', duration = 4000) => {
@@ -542,16 +663,26 @@ const App = {
 
     // Read file from FileSystem API or localStorage fallback
     const readFileFromDisk = async (filename) => {
+      const safe = sanitizeFilename(filename);
+      console.log('[readFileFromDisk] filename:', filename, 'sanitized:', safe);
+      if (!safe) { console.warn(`Blocked read of file with invalid extension: ${filename}`); return null; }
       if (directoryHandle.value) {
+        console.log('[readFileFromDisk] using directoryHandle, name:', directoryHandle.value.name);
         try {
-          const handle = await directoryHandle.value.getFileHandle(filename);
+          const handle = await directoryHandle.value.getFileHandle(safe);
           const file = await handle.getFile();
-          return await file.text();
-        } catch { return null; }
+          console.log('[readFileFromDisk] file size:', file.size);
+          const text = await file.text();
+          console.log('[readFileFromDisk] text length:', text.length);
+          return text;
+        } catch (e) {
+          console.error('[readFileFromDisk] error:', e);
+          return null;
+        }
       }
-      // Fallback: read from localStorage (decoded)
+      // Fallback: read from localStorage (decrypted)
       try {
-        return decodeCache(localStorage.getItem('gantt_fs_' + filename));
+        return await decodeCacheEncrypted(localStorage.getItem('gantt_fs_' + safe));
       } catch { return null; }
     };
 
@@ -583,13 +714,17 @@ const App = {
       const files = await promptFileImport();
       const entries = Object.entries(files);
       if (entries.length === 0) return;
-      entries.forEach(([name, content]) => {
-        localStorage.setItem('gantt_fs_' + name, encodeCache(content));
+      let imported = 0;
+      for (const [name, content] of entries) {
+        const safe = sanitizeFilename(name);
+        if (!safe) { console.warn(`Skipped import of file with invalid extension: ${name}`); continue; }
+        localStorage.setItem('gantt_fs_' + safe, await encodeCacheEncrypted(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
-        if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
-      });
+        if (!index.includes(safe)) { index.push(safe); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
+        imported++;
+      }
       await loadProject();
-      addToast(`📂 ${entries.length} arquivo(s) importado(s)!`, 'success');
+      addToast(`📂 ${imported} arquivo(s) importado(s)!`, 'success');
     };
 
     // Create backup of existing file before overwriting
@@ -607,7 +742,7 @@ const App = {
           console.warn('Failed to create backup for ' + filename, err);
         }
       } else {
-        localStorage.setItem('gantt_fs_' + bakName, encodeCache(existing));
+        localStorage.setItem('gantt_fs_' + bakName, await encodeCacheEncrypted(existing));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(bakName)) { index.push(bakName); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
       }
@@ -615,37 +750,39 @@ const App = {
 
     // File System Access Save Handler with localStorage fallback
     const saveFileToDisk = async (filename, content, retries = 1) => {
-      await backupFile(filename);
+      const safe = sanitizeFilename(filename);
+      if (!safe) { console.warn(`Blocked write of file with invalid extension: ${filename}`); return false; }
+      await backupFile(safe);
       if (directoryHandle.value) {
         for (let attempt = 0; attempt <= retries; attempt++) {
           try {
-            const handle = await directoryHandle.value.getFileHandle(filename, { create: true });
+            const handle = await directoryHandle.value.getFileHandle(safe, { create: true });
             const writable = await handle.createWritable();
             await writable.write('\ufeff' + content);
             await writable.close();
             return true;
           } catch (err) {
-            console.error(`Error writing to file ${filename} (attempt ${attempt + 1})`, err);
+            console.error(`Error writing to file ${safe} (attempt ${attempt + 1})`, err);
             if (attempt < retries) {
               await new Promise(r => setTimeout(r, 500));
               continue;
             }
-            addToast(`Falha ao salvar ${filename} no disco. Salvando localmente como fallback.`, 'warn');
+            addToast(`Falha ao salvar ${safe} no disco. Salvando localmente como fallback.`, 'warn');
           }
         }
       }
-      // Fallback: save to localStorage (encoded)
+      // Fallback: save to localStorage (encrypted)
       try {
-        localStorage.setItem('gantt_fs_' + filename, encodeCache(content));
+        localStorage.setItem('gantt_fs_' + safe, await encodeCacheEncrypted(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
-        if (!index.includes(filename)) {
-          index.push(filename);
+        if (!index.includes(safe)) {
+          index.push(safe);
           localStorage.setItem('gantt_fs_index', JSON.stringify(index));
         }
         return true;
       } catch (err) {
         console.error("Error saving to localStorage fallback", err);
-        addToast(`Erro crítico ao salvar ${filename}. Verifique o espaço disponível no navegador.`, 'error');
+        addToast(`Erro crítico ao salvar ${safe}. Verifique o espaço disponível no navegador.`, 'error');
         return false;
       }
     };
@@ -668,7 +805,7 @@ const App = {
       });
       
       // Save local storage cache too
-      localStorage.setItem('tasks', encodeCache(tasks.value));
+      localStorage.setItem('tasks', await encodeCacheEncrypted(tasks.value));
       await saveFileToDisk(projectMetadata.value.tasksFile, csvContent);
     };
 
@@ -702,7 +839,7 @@ const App = {
         projectOptions.value[idx].name = tempProjectMetadata.value.name;
         projectOptions.value[idx].manager = tempProjectMetadata.value.manager;
         projectOptions.value[idx].startDate = tempProjectMetadata.value.startDate;
-        projectOptions.value[idx].color = tempProjectMetadata.value.color;
+        projectOptions.value[idx].color = safeColor(tempProjectMetadata.value.color);
       } else {
         const cleanName = sanitizeFilename(tempProjectMetadata.value.name || 'Novo Projeto');
         projectOptions.value.push({
@@ -710,7 +847,7 @@ const App = {
           manager: tempProjectMetadata.value.manager,
           startDate: tempProjectMetadata.value.startDate,
           tasksFile: cleanName,
-          color: tempProjectMetadata.value.color || '#6c5ce7'
+          color: safeColor(tempProjectMetadata.value.color)
         });
         projectMetadata.value.tasksFile = cleanName;
       }
@@ -719,11 +856,11 @@ const App = {
       projectMetadata.value.name = tempProjectMetadata.value.name;
       projectMetadata.value.manager = tempProjectMetadata.value.manager;
       projectMetadata.value.startDate = tempProjectMetadata.value.startDate;
-      projectMetadata.value.color = tempProjectMetadata.value.color;
+      projectMetadata.value.color = safeColor(tempProjectMetadata.value.color);
 
       // Update LocalStorage cache
-      localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
-      localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
+      localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
+      localStorage.setItem('projectOptions', await encodeCacheEncrypted(projectOptions.value));
 
       // Save to portfolio.json
       const jsonContent = JSON.stringify(projectOptions.value, null, 2);
@@ -741,7 +878,7 @@ const App = {
         name: projectMetadata.value.name,
         manager: projectMetadata.value.manager,
         startDate: projectMetadata.value.startDate,
-        color: projectMetadata.value.color || '#6c5ce7'
+        color: safeColor(projectMetadata.value.color)
       };
       showProjectSettingsModal.value = true;
     };
@@ -753,27 +890,27 @@ const App = {
         description: portfolioMeta.value.description || '',
         manager: portfolioMeta.value.manager || '',
         baseDate: portfolioMeta.value.baseDate || '',
-        color: portfolioMeta.value.color || '#0984e3'
+        color: safeColor(portfolioMeta.value.color, '#0984e3')
       };
       showPortfolioEditModal.value = true;
     };
 
-    const savePortfolioSettings = () => {
+    const savePortfolioSettings = async () => {
       portfolioMeta.value = {
         ...portfolioMeta.value,
         name: tempPortfolioMeta.value.name,
         description: tempPortfolioMeta.value.description,
         manager: tempPortfolioMeta.value.manager,
         baseDate: tempPortfolioMeta.value.baseDate,
-        color: tempPortfolioMeta.value.color
+        color: safeColor(tempPortfolioMeta.value.color, '#0984e3')
       };
-      localStorage.setItem('portfolioMeta', encodeCache(portfolioMeta.value));
+      localStorage.setItem('portfolioMeta', await encodeCacheEncrypted(portfolioMeta.value));
       showPortfolioEditModal.value = false;
     };
 
     // Holidays Saver
     const saveHolidaysToDisk = async () => {
-      localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+      localStorage.setItem('holidaysMap', await encodeCacheEncrypted(holidaysMap.value));
       const jsonContent = JSON.stringify(holidaysMap.value, null, 2);
       await saveFileToDisk('feriados.json', jsonContent);
     };
@@ -813,9 +950,11 @@ const App = {
 
     const loadProject = async () => {
       if (!directoryHandle.value && !hasLocalStorageFiles()) return;
+      console.log('[loadProject] directoryHandle:', !!directoryHandle.value, 'hasLocalStorageFiles:', hasLocalStorageFiles());
       try {
         // 1. Read portfolio.json
         let metadadosContent = await readFileFromDisk('portfolio.json');
+        console.log('[loadProject] portfolio.json length:', metadadosContent ? metadadosContent.length : 'null');
 
         if (metadadosContent) {
           try {
@@ -826,22 +965,25 @@ const App = {
         startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
         manager: m.manager || m.gerente || '',
         tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv',
-        color: m.color || '#6c5ce7'
+        color: safeColor(m.color, '#6c5ce7')
       }));
 
-              localStorage.setItem('projectOptions', encodeCache(projectOptions.value));
+               localStorage.setItem('projectOptions', await encodeCacheEncrypted(projectOptions.value));
 
-              if (projectOptions.value.length > 0) {
-                // Check if there's a cached active project Name
-                const savedProjectName = decodeCache(localStorage.getItem('activeProjectName'));
-                const found = projectOptions.value.find(p => p.name === savedProjectName);
-                if (found) {
-                  projectMetadata.value = { ...found };
-                } else {
-                  projectMetadata.value = { ...projectOptions.value[0] };
+                if (projectOptions.value.length > 0) {
+                  // Check if there's a cached active project Name
+                  const savedProjectName = await decodeCacheEncrypted(localStorage.getItem('activeProjectName'));
+                  console.log('[loadProject] savedProjectName:', savedProjectName);
+                  const found = projectOptions.value.find(p => p.name === savedProjectName);
+                  if (found) {
+                    projectMetadata.value = { ...found };
+                    console.log('[loadProject] found project, tasksFile:', found.tasksFile);
+                  } else {
+                    projectMetadata.value = { ...projectOptions.value[0] };
+                    console.log('[loadProject] using first project, tasksFile:', projectOptions.value[0].tasksFile);
+                  }
+                  localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
                 }
-                localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
-              }
             }
           } catch (e) {
             console.error("Erro ao analisar portfolio.json", e);
@@ -879,13 +1021,15 @@ const App = {
           });
         }
         holidaysMap.value = newHols;
-        localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+        localStorage.setItem('holidaysMap', await encodeCacheEncrypted(holidaysMap.value));
       }
     };
 
     const loadTasks = async () => {
       if (!directoryHandle.value && !hasLocalStorageFiles()) return;
+      console.log('[loadTasks] tasksFile:', projectMetadata.value.tasksFile);
       let tContent = await readFileFromDisk(projectMetadata.value.tasksFile);
+      console.log('[loadTasks] content length:', tContent ? tContent.length : 'null');
 
       if (tContent) {
         const rawTasks = parseCSV(tContent);
@@ -918,7 +1062,7 @@ const App = {
         });
         calculateSchedule(mappedTasks, projectMetadata.value.startDate);
         tasks.value = mappedTasks;
-        localStorage.setItem('tasks', encodeCache(mappedTasks));
+        localStorage.setItem('tasks', await encodeCacheEncrypted(mappedTasks));
         buildTimeline();
       } else {
         tasks.value = [];
@@ -932,8 +1076,8 @@ const App = {
         manager: proj.manager,
         tasksFile: proj.tasksFile
       };
-      localStorage.setItem('activeProjectName', encodeCache(proj.name));
-      localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
+      localStorage.setItem('activeProjectName', await encodeCacheEncrypted(proj.name));
+      localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
       showProjectSelector.value = false;
       await loadTasks();
     };
@@ -1161,11 +1305,11 @@ const App = {
       const files = await promptFileImport();
       const entries = Object.entries(files);
       if (entries.length === 0) return;
-      entries.forEach(([name, content]) => {
-        localStorage.setItem('gantt_fs_' + name, encodeCache(content));
+      for (const [name, content] of entries) {
+        localStorage.setItem('gantt_fs_' + name, await encodeCacheEncrypted(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
         if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
-      });
+      }
       hasFolder.value = true;
       localStorage.setItem('hasFolder', 'true');
       await loadProject();
@@ -1295,11 +1439,11 @@ const App = {
               [`${currYear}-12-25`]: "Natal"
             };
             holidaysMap.value = defaultHols;
-            localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+            localStorage.setItem('holidaysMap', await encodeCacheEncrypted(holidaysMap.value));
             await saveFileToDisk('feriados.json', JSON.stringify(defaultHols, null, 2));
           } else {
             holidaysMap.value = {};
-            localStorage.setItem('holidaysMap', encodeCache({}));
+            localStorage.setItem('holidaysMap', await encodeCacheEncrypted({}));
             await saveFileToDisk('feriados.json', JSON.stringify({}, null, 2));
           }
         } else {
@@ -1307,7 +1451,7 @@ const App = {
           const hContent = await readFileFromDisk('feriados.json');
           if (hContent) {
             try { holidaysMap.value = JSON.parse(hContent); } catch {}
-            localStorage.setItem('holidaysMap', encodeCache(holidaysMap.value));
+            localStorage.setItem('holidaysMap', await encodeCacheEncrypted(holidaysMap.value));
           }
         }
 
@@ -1351,10 +1495,10 @@ const App = {
           startDate: wizardStartDate.value,
           manager: wizardManager.value.trim() || '',
           tasksFile: cleanName,
-          color: wizardColor.value
+          color: safeColor(wizardColor.value)
         };
-        localStorage.setItem('activeProjectName', encodeCache(projectMetadata.value.name));
-        localStorage.setItem('projectMetadata', encodeCache(projectMetadata.value));
+        localStorage.setItem('activeProjectName', await encodeCacheEncrypted(projectMetadata.value.name));
+        localStorage.setItem('projectMetadata', await encodeCacheEncrypted(projectMetadata.value));
 
         // Read existing portfolio.json, append project, save back
         let portfolioProjects = [];
@@ -1371,12 +1515,12 @@ const App = {
           portfolioProjects.push({ ...projectMetadata.value });
         }
         projectOptions.value = portfolioProjects;
-        localStorage.setItem('projectOptions', encodeCache(portfolioProjects));
+        localStorage.setItem('projectOptions', await encodeCacheEncrypted(portfolioProjects));
         await saveFileToDisk('portfolio.json', JSON.stringify(portfolioProjects, null, 2));
 
         calculateSchedule(mappedInit, projectMetadata.value.startDate);
         tasks.value = mappedInit;
-        localStorage.setItem('tasks', encodeCache(mappedInit));
+        localStorage.setItem('tasks', await encodeCacheEncrypted(mappedInit));
         buildTimeline();
         await saveTasksToDisk();
 
@@ -1415,17 +1559,16 @@ const App = {
       }
       try {
         const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-        // Check if folder is empty or has only portfolio.json / feriados.json
+        // Check if folder contains only allowed project files
         const entries = [];
         for await (const entry of handle.values()) {
           entries.push(entry.name);
         }
-        const allowed = ['portfolio.json', 'feriados.json'];
-        const hasOther = entries.some(name => !allowed.includes(name));
+        const hasInvalid = entries.some(name => !isValidProjectFile(name));
         if (entries.length > 0) {
-          if (hasOther) {
+          if (hasInvalid) {
             const proceed = await showCustomConfirm(
-              'A pasta não está vazia ou contém arquivos não reconhecidos. Deseja continuar?',
+              'A pasta contém arquivos com extensões não reconhecidas. Deseja continuar?',
               'Pasta não vazia',
               'warn'
             );
@@ -1531,23 +1674,23 @@ const App = {
           hols[h.date] = h.name;
         });
         holidaysMap.value = hols;
-        localStorage.setItem('holidaysMap', encodeCache(hols));
+        localStorage.setItem('holidaysMap', await encodeCacheEncrypted(hols));
         await saveFileToDisk('feriados.json', JSON.stringify(hols, null, 2));
 
         // 3. Save portfolio metadata to localStorage
         const portfolioMeta = {
           name: pfName.value.trim(),
           description: pfDescription.value.trim(),
-          color: pfColor.value,
+          color: safeColor(pfColor.value),
           manager: pfManager.value.trim(),
           baseDate: pfBaseDate.value,
           createdAt: new Date().toISOString()
         };
-        localStorage.setItem('portfolioMeta', encodeCache(portfolioMeta));
+        localStorage.setItem('portfolioMeta', await encodeCacheEncrypted(portfolioMeta));
 
         // 4. Create empty portfolio.json (backward-compatible array of projects)
         projectOptions.value = [];
-        localStorage.setItem('projectOptions', encodeCache([]));
+        localStorage.setItem('projectOptions', await encodeCacheEncrypted([]));
         await saveFileToDisk('portfolio.json', JSON.stringify([], null, 2));
 
         // 5. Close portfolio wizard and open project wizard
@@ -2193,19 +2336,19 @@ const App = {
       if (cachedHasFolder) {
         hasFolder.value = true;
         try {
-          const cachedMeta = decodeCache(localStorage.getItem('projectMetadata'));
+          const cachedMeta = await decodeCacheEncrypted(localStorage.getItem('projectMetadata'));
           if (cachedMeta) projectMetadata.value = cachedMeta;
 
-          const cachedPortMeta = decodeCache(localStorage.getItem('portfolioMeta'));
+          const cachedPortMeta = await decodeCacheEncrypted(localStorage.getItem('portfolioMeta'));
           if (cachedPortMeta) portfolioMeta.value = cachedPortMeta;
 
-          const cachedOpts = decodeCache(localStorage.getItem('projectOptions'));
+          const cachedOpts = await decodeCacheEncrypted(localStorage.getItem('projectOptions'));
           if (cachedOpts) projectOptions.value = cachedOpts;
 
-          const cachedHols = decodeCache(localStorage.getItem('holidaysMap'));
+          const cachedHols = await decodeCacheEncrypted(localStorage.getItem('holidaysMap'));
           if (cachedHols) holidaysMap.value = cachedHols;
 
-          const cachedTasks = decodeCache(localStorage.getItem('tasks'));
+          const cachedTasks = await decodeCacheEncrypted(localStorage.getItem('tasks'));
           if (cachedTasks && Array.isArray(cachedTasks)) {
             const rawCachedTasks = cachedTasks;
             tasks.value = rawCachedTasks.map(t => ({
@@ -2230,6 +2373,7 @@ const App = {
           const status = await handle.queryPermission({ mode: 'readwrite' });
           permissionStatus.value = status;
           if (status === 'granted') {
+            hasFolder.value = true;
             await loadProject();
           }
         } else {
@@ -2357,6 +2501,7 @@ const App = {
       stats, donutBg, recalculateStatus, saving,
       showBaselineBars, showRealBars, hasAnyBaseline,
       columnView, gridTemplate, minTaskListWidth, selectAllBaseline,
+      safeColor,
       
       // Custom Dialogs and Toasts
       toasts, customDialog, addToast, removeToast, showCustomAlert, showCustomConfirm,

@@ -1,9 +1,21 @@
 @echo off
-echo Iniciando Chrome com acesso liberado a arquivos locais...
+echo Iniciando ProjectGantt com servidor local seguro...
+echo.
 
 set CHROME_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"
-:: Usando a variável de ambiente para evitar erro de nome de usuário
-set FILE_PATH="file:///%USERPROFILE%\OneDrive\Apps\ProjectGantt\index.html"
+set PORT=8787
+set URL=http://127.0.0.1:%PORT%
 set USER_DATA_DIR="%TEMP%\chrome-dev-gantt"
 
-start "" %CHROME_PATH% --allow-file-access-from-files --user-data-dir=%USER_DATA_DIR% --lang=pt-BR %FILE_PATH%
+:: Inicia o servidor Node.js em segundo plano
+start "ProjectGantt Server" /B node "%~dp0server.js"
+
+:: Aguarda o servidor iniciar
+timeout /t 2 /nobreak >nul
+
+:: Abre o Chrome no servidor local (sem flags inseguras)
+start "" %CHROME_PATH% --user-data-dir=%USER_DATA_DIR% --lang=pt-BR %URL%
+
+echo ProjectGantt aberto no navegador.
+echo O servidor local esta rodando na porta %PORT%.
+echo Feche o Chrome para parar o servidor.
