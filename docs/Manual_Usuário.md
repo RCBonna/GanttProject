@@ -65,16 +65,20 @@ O **ProjectGantt** é uma aplicação web de gerenciamento de projetos com gráf
    ```
 2. Acesse `http://localhost:3000` no navegador.
 
-### 3.2 Selecionando a Pasta do Projeto
+### 3.2 Selecionando a Pasta do Portfólio
 
-1. Clique no botão **"📁 Abrir Pasta"** no canto superior direito ou no botão central **"📁 Selecionar Pasta"**.
-2. Navegue até a pasta que contém seus arquivos CSV do projeto.
-3. Conceda permissão de leitura/escrita quando solicitado pelo navegador.
-4. O sistema lerá automaticamente o arquivo `projeto.csv` e carregará as tarefas.
+1. Clique no botão **"📁 Abrir Pasta"** (menu ⚙️) ou no botão central **"📁 Selecionar Pasta"**.
+2. Navegue até a pasta do portfólio e conceda permissão de leitura/escrita quando solicitado.
+3. O sistema valida os arquivos de configuração:
+   - Se existir `portfolio.json`: lê os projetos registrados.
+   - Se não existir `portfolio.json`: oferece criação de um novo portfólio (wizard).
+4. O arquivo `feriados.json` é opcional na abertura inicial: se não existir, pode ser criado pelo fluxo do portfólio.
 
 ### 3.3 Selecionando um Projeto
 
-Se a pasta contiver múltiplos projetos listados no `projeto.csv`, uma janela de seleção aparecerá permitindo escolher qual projeto carregar.
+- Se o `portfolio.json` tiver **1 projeto**, o sistema abre direto no Gantt.
+- Se o `portfolio.json` tiver **2+ projetos**, abre a tela para seleção do projeto.
+- Se o `portfolio.json` estiver vazio, o sistema oferece criar o primeiro projeto.
 
 ---
 
@@ -82,18 +86,10 @@ Se a pasta contiver múltiplos projetos listados no `projeto.csv`, uma janela de
 
 Sua pasta de projeto deve conter os seguintes arquivos:
 
-### `projeto.csv` — Metadados do Projeto
-```csv
-Nome;Gerente;Data_Inicio;Arquivo_Tarefas
-Meu Projeto;João Silva;2026-05-04;projeto-0.csv
-```
+### `portfolio.json` — Catálogo de Projetos do Portfólio
 
-| Campo | Descrição | Formato |
-|-------|-----------|---------|
-| Nome | Nome do projeto | Texto livre |
-| Gerente | Nome do gerente responsável | Texto livre |
-| Data_Inicio | Data de início do projeto | `YYYY-MM-DD` |
-| Arquivo_Tarefas | Nome do arquivo CSV de tarefas | Ex: `projeto-0.csv` |
+Contém a lista de projetos disponíveis na pasta.
+Cada item referencia o CSV de tarefas do projeto.
 
 ### `projeto-0.csv` (ou nome customizado) — Tarefas
 ```csv
@@ -119,12 +115,9 @@ ID;Tarefa;Duracao;Predecessora;Percent_Completo;Data_Inicio_Planejado;Data_Fim_P
 
 > 💡 As datas podem estar no formato `YYYY-MM-DD` ou `DD/MM/YYYY`. O sistema reconhece ambos.
 
-### `feriados.csv` — Feriados e Dias Não Úteis
-```csv
-Data;Nome
-2026-01-01;Confraternização Universal
-2026-04-21;Tiradentes
-```
+### `feriados.json` — Feriados e Dias Não Úteis
+
+Mapa de feriados por data (`YYYY-MM-DD`).
 
 ---
 
@@ -138,8 +131,8 @@ A interface é dividida em áreas funcionais:
 |----------|--------|
 | **Nome do Projeto** | Exibe o nome e gerente do projeto ativo |
 | **✏️ Editar** | Abre configurações do projeto (nome, gerente, data início) |
-| **📸 Salvar Baseline** | Captura um snapshot do cronograma atual |
-| **📁 Abrir Pasta** | (Re)conecta à pasta de arquivos do projeto |
+| **▶ Informações do Portfólio** | Abre o painel lateral com dados do portfólio |
+| **⚙️ Menu** | Ações do sistema (Alterar Projeto, Alterar Portfólio, Feriados, etc.) |
 | **🌓 Tema** | Alterna entre tema claro e escuro |
 | **Exportar Imagem** | Gera uma imagem PNG do gráfico |
 

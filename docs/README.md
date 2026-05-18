@@ -67,9 +67,9 @@ graph LR
 
 O stack tecnológico do ProjectGantt foi selecionado para garantir portabilidade absoluta de arquivos estáticos, permitindo que a aplicação seja empacotada em ambientes corporativos fechados de forma ágil e segura.
 
-* **Núcleo de Reatividade:** **Vue 3 CDN (Sem Empacotamento / Runtime Only)**. Permite reatividade em tempo de execução sem passar por pipelines complexos de compilação (como Webpack/Rspack), eliminando o risco de quebras de dependências do NPM.
+* **Núcleo de Reatividade:** **Vue 3 (ESM) + Vite Build**. A aplicação roda com bundling moderno em módulos, mantendo bootstrap simples e previsível para ambiente local-first.
 * **Mecanismo de Estilização:** **Vanilla CSS3 com Custom Properties**. Utiliza variáveis CSS dinâmicas para controle completo dos temas Claro/Escuro e ajuste sob demanda de larguras de colunas do gráfico, sem a latência de injeção de CSS em JS.
-* **Servidor de Desenvolvimento:** **Vite**. Embora não compile o código (mantendo o monolito em arquivo único `vue_app.js`), o Vite fornece um servidor estático leve ideal para contornar restrições CORS da API de Arquivos do navegador (`localhost` seguro).
+* **Servidor de Desenvolvimento e Build:** **Vite**. Responsável por dev server local (`localhost` seguro para File System Access API) e build de produção otimizado.
 * **Persistência Volátil e Rápida:** **IndexedDB + LocalStorage (Base64 v1:e:)**. IndexedDB é utilizado exclusivamente para persistir o `FileSystemDirectoryHandle` (token de acesso físico), enquanto o LocalStorage atua como cache instantâneo de tarefas para a pintura de tela antes da autorização do disco pelo usuário.
 * **Componentes de Exportação:** **html2canvas** + **jsPDF**. Biblioteca de rasterização do DOM diretamente em vetor de pixels para conversão e download de gráficos PNG e relatórios executivos em formato PDF vetorial.
 

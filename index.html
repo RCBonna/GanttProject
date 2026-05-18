@@ -11,10 +11,10 @@
 <body>
 <div id="app" v-cloak>
   <div class="header">
-    <div class="portfolio-trigger" v-if="portfolioMeta && portfolioMeta.name" @click="showPortfolioInfo = !showPortfolioInfo" title="Informações do Portfólio" aria-label="Informações do Portfólio" :style="showPortfolioInfo ? 'border-color:' + safeColor(portfolioMeta.color) + ';color:' + safeColor(portfolioMeta.color) : ''">
+    <div class="portfolio-trigger" v-if="hasActiveProject && hasPortfolioContext" @click.stop="togglePortfolioInfo" title="Informações do Portfólio" aria-label="Informações do Portfólio" :style="showPortfolioInfo ? 'border-color:' + safeColor(effectivePortfolioMeta.color) + ';color:' + safeColor(effectivePortfolioMeta.color) : ''">
       <span v-if="!showPortfolioInfo">▶</span><span v-else>◀</span>
     </div>
-    <div class="header-left">
+    <div class="header-left" v-if="hasActiveProject">
       <div style="display:flex; align-items:center; gap:8px">
         <h1 :style="projectMetadata.color ? 'color:' + safeColor(projectMetadata.color) + ';-webkit-text-fill-color:' + safeColor(projectMetadata.color) : ''">{{ projectMetadata.name || 'Gantt Project' }}</h1>
         <button class="btn-theme" @click="openProjectSettings" title="Configurações do Projeto" aria-label="Configurações do Projeto" style="border:none; background:none; font-size:14px; cursor:pointer; padding:0; height:auto; margin:0">✏️</button>
@@ -27,14 +27,15 @@
         <button class="btn-theme" @click="showMoreMenu = !showMoreMenu" title="Mais ações" aria-label="Mais ações">⚙️</button>
         <div v-if="showMoreMenu" class="more-dropdown" @click="showMoreMenu = false">
           <button v-if="hasFolder && projectOptions.length > 0" @click="showProjectSelector = true" aria-label="Alterar projeto ativo"><span aria-hidden="true">📁</span> Alterar Projeto</button>
+          <button v-if="hasFolder" @click="openProjectFolder" title="Selecionar outra pasta de portfólio"><span aria-hidden="true">🗂️</span> Alterar Portfólio</button>
           <button v-if="hasFolder" @click="showHolidaysModal = true" title="Gerenciar Feriados"><span aria-hidden="true">📅</span> Feriados</button>
           <button v-if="hasFolder && !directoryHandle" @click="exportProjectFiles" title="Baixar os arquivos do projeto para o disco"><span aria-hidden="true">💾</span> Salvar Arquivos</button>
           <button v-if="hasFolder && !directoryHandle && tasks.length > 0" @click="importFilesFromDisk" title="Importar mais arquivos CSV/JSON"><span aria-hidden="true">📂</span> Importar</button>
           <button v-if="hasFolder" @click="closeProjectFolder" title="Fechar o projeto atual e limpar os dados da sessão"><span aria-hidden="true">🔌</span> Fechar Pasta</button>
           <hr>
           <button @click="startNewProjectWizard" title="Criar um novo projeto do zero em uma pasta vazia"><span aria-hidden="true">✨</span> Novo Projeto</button>
-          <button v-if="portfolioMeta" @click="showPortfolioInfo = true; showMoreMenu = false" title="Ver informações do portfólio"><span aria-hidden="true">📋</span> Sobre o Portfólio</button>
-          <button v-if="portfolioMeta" @click="showMoreMenu = false; openPortfolioSettings()" title="Editar portfólio"><span aria-hidden="true">✏️</span> Editar Portfólio</button>
+          <button v-if="hasPortfolioContext" @click="openPortfolioInfo" title="Ver informações do portfólio"><span aria-hidden="true">📋</span> Sobre o Portfólio</button>
+          <button v-if="hasPortfolioContext" @click="showMoreMenu = false; openPortfolioSettings()" title="Editar portfólio"><span aria-hidden="true">✏️</span> Editar Portfólio</button>
           <button @click="startPortfolioWizard" title="Criar um portfólio completo de projetos do zero"><span aria-hidden="true">📂</span> Novo Portfólio</button>
           <button v-if="!hasFolder" @click="openProjectFolder" title="Abrir pasta de projeto"><span aria-hidden="true">📂</span> Abrir Pasta</button>
         </div>
@@ -241,47 +242,6 @@
     </div>
   </div>
 
-  <!-- Portfolio Overlay -->
-  <div v-if="showPortfolioInfo && portfolioMeta" class="portfolio-overlay" @click="showPortfolioInfo = false">
-    <div class="portfolio-overlay-content" @click.stop>
-      <div class="portfolio-overlay-header" :style="{background: safeColor(portfolioMeta.color, 'var(--accent)')}">
-        <span class="portfolio-overlay-title">{{ portfolioMeta.name }}</span>
-        <div style="display:flex;gap:6px">
-          <button class="portfolio-overlay-close" @click="openPortfolioSettings" aria-label="Editar portfólio">✏️</button>
-          <button class="portfolio-overlay-close" @click="showPortfolioInfo = false" aria-label="Fechar informações do portfólio">✕</button>
-        </div>
-      </div>
-      <div class="portfolio-overlay-body">
-        <div v-if="portfolioMeta.manager" class="portfolio-overlay-row">
-          <span class="portfolio-overlay-label">Gerente</span>
-          <span class="portfolio-overlay-value">{{ portfolioMeta.manager }}</span>
-        </div>
-        <div v-if="portfolioMeta.baseDate" class="portfolio-overlay-row">
-          <span class="portfolio-overlay-label">Data base</span>
-          <span class="portfolio-overlay-value">{{ formatDatePT(portfolioMeta.baseDate) }}</span>
-        </div>
-        <div v-if="portfolioMeta.description" class="portfolio-overlay-row">
-          <span class="portfolio-overlay-label">Descrição</span>
-          <span class="portfolio-overlay-value">{{ portfolioMeta.description }}</span>
-        </div>
-        <div v-if="portfolioMeta.createdAt" class="portfolio-overlay-row">
-          <span class="portfolio-overlay-label">Criado em</span>
-          <span class="portfolio-overlay-value">{{ formatDatePT(portfolioMeta.createdAt) }}</span>
-        </div>
-        <div class="portfolio-overlay-row">
-          <span class="portfolio-overlay-label">Tema</span>
-          <span class="portfolio-overlay-value">
-            <span :style="'display:inline-block;width:14px;height:14px;border-radius:50%;background:' + safeColor(portfolioMeta.color, 'var(--accent)') + ';vertical-align:middle;margin-right:6px'"></span>
-            {{ safeColor(portfolioMeta.color) || '—' }}
-          </span>
-        </div>
-      </div>
-      <div class="portfolio-overlay-footer" :style="{borderTopColor: safeColor(portfolioMeta.color, 'var(--accent)') + '44'}">
-        <span v-if="projectOptions && projectOptions.length" style="font-size:11px;color:var(--text3)">{{ projectOptions.length }} projeto(s) no portfólio</span>
-      </div>
-    </div>
-  </div>
-        
         <!-- Arrows SVG -->
         <svg class="dep-svg" :width="chartColumns.length * colWidth" :height="tasks.length * 34" style="pointer-events:none; z-index:0; position:absolute; top:0; left:0;">
            <defs>
@@ -302,8 +262,49 @@
 
   <div class="empty-state" v-else>
     <h2>Nenhum projeto carregado</h2>
-    <p>Selecione uma pasta com portfolio.json e feriados.json para abrir um portfólio existente, ou escolha uma pasta vazia para iniciar um novo portfólio.</p>
+    <p>Selecione uma pasta com <strong><code>portfolio.json</code></strong> para abrir um portfólio existente, ou escolha uma pasta vazia para iniciar um novo portfólio.</p>
     <button class="btn-cta" @click="openProjectFolder"><span aria-hidden="true">📂</span> Selecionar Pasta</button>
+  </div>
+
+  <!-- Portfolio Overlay -->
+  <div v-if="showPortfolioInfo && hasPortfolioContext" class="portfolio-overlay" @click.self="closePortfolioInfo">
+    <div class="portfolio-overlay-content" @click.stop>
+      <div class="portfolio-overlay-header" :style="{background: safeColor(effectivePortfolioMeta.color, 'var(--accent)')}">
+        <span class="portfolio-overlay-title">{{ effectivePortfolioMeta.name }}</span>
+        <div style="display:flex;gap:6px">
+          <button class="portfolio-overlay-close" @click="openPortfolioSettings" aria-label="Editar portfólio">✏️</button>
+          <button class="portfolio-overlay-close" @click="closePortfolioInfo" aria-label="Fechar informações do portfólio">✕</button>
+        </div>
+      </div>
+      <div class="portfolio-overlay-body">
+        <div v-if="effectivePortfolioMeta.manager" class="portfolio-overlay-row">
+          <span class="portfolio-overlay-label">Gerente</span>
+          <span class="portfolio-overlay-value">{{ effectivePortfolioMeta.manager }}</span>
+        </div>
+        <div v-if="effectivePortfolioMeta.baseDate" class="portfolio-overlay-row">
+          <span class="portfolio-overlay-label">Data base</span>
+          <span class="portfolio-overlay-value">{{ formatDatePT(effectivePortfolioMeta.baseDate) }}</span>
+        </div>
+        <div v-if="effectivePortfolioMeta.description" class="portfolio-overlay-row">
+          <span class="portfolio-overlay-label">Descrição</span>
+          <span class="portfolio-overlay-value">{{ effectivePortfolioMeta.description }}</span>
+        </div>
+        <div v-if="effectivePortfolioMeta.createdAt" class="portfolio-overlay-row">
+          <span class="portfolio-overlay-label">Criado em</span>
+          <span class="portfolio-overlay-value">{{ formatDatePT(effectivePortfolioMeta.createdAt) }}</span>
+        </div>
+        <div class="portfolio-overlay-row">
+          <span class="portfolio-overlay-label">Tema</span>
+          <span class="portfolio-overlay-value">
+            <span :style="'display:inline-block;width:14px;height:14px;border-radius:50%;background:' + safeColor(effectivePortfolioMeta.color, 'var(--accent)') + ';vertical-align:middle;margin-right:6px'"></span>
+            {{ safeColor(effectivePortfolioMeta.color) || '—' }}
+          </span>
+        </div>
+      </div>
+      <div class="portfolio-overlay-footer" :style="{borderTopColor: safeColor(effectivePortfolioMeta.color, 'var(--accent)') + '44'}">
+        <span v-if="projectOptions && projectOptions.length" style="font-size:11px;color:var(--text3)">{{ projectOptions.length }} projeto(s) no portfólio</span>
+      </div>
+    </div>
   </div>
 
   <!-- TOOLTIP DETALHADO -->

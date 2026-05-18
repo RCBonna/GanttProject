@@ -1,377 +1,33 @@
 import { createApp, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue/dist/vue.esm-bundler.js';
-
-// ─── Color Validation ─────────────────────────────────────────────────────
-
-const VALID_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
-const SAFE_FALLBACK_COLOR = '#6c5ce7';
-
-function isValidColor(val) {
-  return typeof val === 'string' && VALID_HEX_COLOR.test(val);
-}
-
-function safeColor(val, fallback = SAFE_FALLBACK_COLOR) {
-  return isValidColor(val) ? val : fallback;
-}
-
-// ─── File Extension Validation ────────────────────────────────────────────
-
-const ALLOWED_EXTENSIONS = new Set(['.json', '.csv', '.bak']);
-
-function isValidProjectFile(filename) {
-  if (!filename || typeof filename !== 'string') return false;
-  const lower = filename.toLowerCase();
-  return Array.from(ALLOWED_EXTENSIONS).some(ext => lower.endsWith(ext));
-}
-
-function sanitizeFilename(filename) {
-  if (!isValidProjectFile(filename)) {
-    return null;
-  }
-  return filename.replace(/[/\\:*?"<>|]/g, '_').trim();
-}
-
-const BAR_COLORS = [
-  'linear-gradient(135deg, #6c5ce7, #a29bfe)', // Roxo Premium
-  'linear-gradient(135deg, #00cec9, #74b9ff)', // Turquesa / Azul Claro
-  'linear-gradient(135deg, #fd79a8, #fab1a0)', // Rosa / Coral
-  'linear-gradient(135deg, #e17055, #fab1a0)', // Coral Premium
-  'linear-gradient(135deg, #0984e3, #74b9ff)'  // Azul Real
-];
-const ROW_H = 34;
-const MONTHS_PT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-const DAYS_PT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-
-// Helper Functions
-function isWeekend(d) {
-  const w = d.getDay();
-  return w === 0 || w === 6;
-}
-
-function addDays(d, n) {
-  const r = new Date(d);
-  r.setDate(r.getDate() + n);
-  return r;
-}
-
-function parseDate(s) {
-  if (!s) return null;
-  if (typeof s === 'object' && s instanceof Date) return isNaN(s) ? null : s;
-  const str = String(s).trim();
-  // Handle DD/MM/YYYY format
-  const brMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (brMatch) {
-    const d = new Date(`${brMatch[3]}-${brMatch[2]}-${brMatch[1]}T00:00:00`);
-    return isNaN(d) ? null : d;
-  }
-  const d = new Date(str + 'T00:00:00');
-  return isNaN(d) ? null : d;
-}
-
-// Safer local date format YYYY-MM-DD
-function getLocalISOString(d) {
-  if (!d) return '';
-  if (typeof d === 'string') {
-    const s = d.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-      return s.substring(0, 10);
-    }
-    const brMatch = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (brMatch) {
-      return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
-    }
-  }
-  let dateObj = typeof d === 'string' ? new Date(d) : d;
-  if (isNaN(dateObj)) return '';
-  const year = dateObj.getFullYear();
-  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-  const day = String(dateObj.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function sanitizeCSV(val) {
-  if (typeof val !== 'string') return val;
-  if (/^[=+\-@|\t]/.test(val)) return "'" + val;
-  if (/\r|\n/.test(val)) return val.replace(/\r?\n/g, ' ').replace(/\r/g, ' ');
-  return val;
-}
-
-function hasLocalStorageFiles() {
-  try {
-    const index = localStorage.getItem('gantt_fs_index');
-    return !!(index && JSON.parse(index).length > 0);
-  } catch { return false; }
-}
-
-const CACHE_VERSION = 1;
-
-function clearAllCache() {
-  const keys = ['tasks', 'projectMetadata', 'projectOptions', 'holidaysMap', 'activeProjectName', 'hasFolder'];
-  keys.forEach(k => localStorage.removeItem(k));
-}
-
-function checkCacheVersion() {
-  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
-  const stored = localStorage.getItem('gantt_cache_version');
-  if (stored !== String(CACHE_VERSION)) {
-    clearAllCache();
-    localStorage.setItem('gantt_cache_version', String(CACHE_VERSION));
-  }
-}
-
-// ============================================================
-// Web Crypto API — Optional AES-GCM encryption for LocalStorage
-// ============================================================
-
-const CACHE_ENCRYPTION_KEY = 'gantt_encryption_enabled';
-const CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY = 'gantt_encryption_salt';
-let cacheEncryptionPassword = null;
-
-async function cryptoDeriveKey(password, salt) {
-  const enc = new TextEncoder();
-  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
-async function cryptoEncrypt(plaintext, password) {
-  const enc = new TextEncoder();
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await cryptoDeriveKey(password, salt);
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plaintext));
-  const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
-  combined.set(salt, 0);
-  combined.set(iv, salt.length);
-  combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
-  return btoa(String.fromCharCode(...combined));
-}
-
-async function cryptoDecrypt(b64data, password) {
-  const combined = Uint8Array.from(atob(b64data), c => c.charCodeAt(0));
-  const salt = combined.slice(0, 16);
-  const iv = combined.slice(16, 28);
-  const ciphertext = combined.slice(28);
-  const key = await cryptoDeriveKey(password, salt);
-  const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
-  return new TextDecoder().decode(plaintext);
-}
-
-function isEncryptionEnabled() {
-  return localStorage.getItem(CACHE_ENCRYPTION_KEY) === 'true';
-}
-
-function enableEncryption(password) {
-  cacheEncryptionPassword = password || null;
-  localStorage.setItem(CACHE_ENCRYPTION_KEY, 'true');
-  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
-}
-
-function disableEncryption() {
-  cacheEncryptionPassword = null;
-  localStorage.removeItem(CACHE_ENCRYPTION_KEY);
-  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
-}
-
-function getEncryptionPassword() {
-  return cacheEncryptionPassword;
-}
-
-function requestEncryptionPassword() {
-  if (cacheEncryptionPassword) return cacheEncryptionPassword;
-  if (localStorage.getItem(CACHE_ENCRYPTION_KEY) !== 'true') return null;
-  const password = window.prompt('Informe a senha do cache criptografado para esta sessão. A senha não será salva no navegador.');
-  cacheEncryptionPassword = password || null;
-  localStorage.removeItem(CACHE_ENCRYPTION_LEGACY_PASSWORD_KEY);
-  return cacheEncryptionPassword;
-}
-
-async function encodeCacheEncrypted(data) {
-  const password = getEncryptionPassword();
-  if (!password) return encodeCache(data);
-  try {
-    const json = JSON.stringify(data);
-    const encrypted = await cryptoEncrypt(json, password);
-    return 'v2:enc:' + encrypted;
-  } catch (e) {
-    console.error('Encryption failed, falling back to base64:', e);
-    return encodeCache(data);
-  }
-}
-
-async function decodeCacheEncrypted(str) {
-  if (!str || typeof str !== 'string') return null;
-  if (str.startsWith('v2:enc:')) {
-    const password = requestEncryptionPassword();
-    if (!password) return null;
-    try {
-      const decrypted = await cryptoDecrypt(str.slice(7), password);
-      return JSON.parse(decrypted);
-    } catch (e) {
-      console.error('Decryption failed (wrong password or corrupted data):', e);
-      return null;
-    }
-  }
-  // Fall back to v1:e: format for backward compatibility
-  return decodeCache(str);
-}
-
-// Keep original functions for backward compatibility
-function encodeCache(data) {
-  try { return 'v1:e:' + btoa(encodeURIComponent(JSON.stringify(data))); }
-  catch { return JSON.stringify(data); }
-}
-
-function decodeCache(str) {
-  if (!str || typeof str !== 'string') return null;
-  if (str.startsWith('v1:e:')) {
-    try { return JSON.parse(decodeURIComponent(atob(str.slice(5)))); }
-    catch { return null; }
-  }
-  if (str.startsWith('e:')) {
-    try { return JSON.parse(decodeURIComponent(atob(str.slice(2)))); }
-    catch { return null; }
-  }
-  try { return JSON.parse(str); }
-  catch { return null; }
-}
-
-function toInputDateFormat(val) {
-  if (!val) return '';
-  const str = String(val).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-  const brMatch = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (brMatch) {
-    return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
-  }
-  const d = parseDate(str);
-  if (d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-  return '';
-}
-
-function formatDatePT(dateStr) {
-  if (!dateStr) return '--';
-  if (dateStr instanceof Date) {
-    const day = String(dateStr.getDate()).padStart(2, '0');
-    const month = String(dateStr.getMonth() + 1).padStart(2, '0');
-    const year = dateStr.getFullYear();
-    return `${day}/${month}/${year}`;
-  }
-  const d = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  const parts = d.split('-');
-  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  return dateStr;
-}
-
-function getDayOfWeekPT(dateStr) {
-  if (!dateStr) return '';
-  const d = parseDate(dateStr);
-  return d ? DAYS_PT[d.getDay()] : '';
-}
-
-// IndexedDB Directory Handle Persistence
-const DB_NAME = 'GanttProjectDB';
-const STORE_NAME = 'handles';
-const KEY_NAME = 'projectFolder';
-
-function getDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME);
-      }
-    };
-    request.onsuccess = (e) => resolve(e.target.result);
-    request.onerror = (e) => reject(e.target.error);
-  });
-}
-
-async function saveHandleToDB(handle) {
-  try {
-    const db = await getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.put(handle, KEY_NAME);
-      req.onsuccess = () => resolve(true);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  } catch (err) {
-    console.error('IndexedDB save failed', err);
-    return false;
-  }
-}
-
-async function loadHandleFromDB() {
-  try {
-    const db = await getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(KEY_NAME);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = (e) => reject(e.target.error);
-    });
-  } catch (err) {
-    console.error('IndexedDB load failed', err);
-    return null;
-  }
-}
-
-// CSV Field Mapping — centralized source of truth for D-05
-const CSV_WRITE_FIELDS = [
-  { key: 'id', label: 'ID' },
-  { key: 'task', label: 'Tarefa' },
-  { key: 'duration', label: 'Duracao' },
-  { key: 'percent', label: 'Progresso' },
-  { key: 'predecessor', label: 'Predecessora' },
-  { key: 'type', label: 'Tipo' },
-  { key: 'realStart', label: 'Data_Inicial_Real' },
-  { key: 'realEnd', label: 'Data_Final_Real' },
-  { key: 'plannedStart', label: 'Data_Inicial_Planejada' },
-  { key: 'plannedEnd', label: 'Data_Final_Planejada' },
-  { key: 'baselineStart', label: 'Data_Inicial_Baseline' },
-  { key: 'baselineEnd', label: 'Data_Final_Baseline' },
-  { key: 'baselineDate', label: 'Baseline_Data' }
-];
-
-function normalizePortfolioProjects(metaRows) {
-  if (!Array.isArray(metaRows)) return [];
-  return metaRows.map(m => ({
-    name: m.name || m['nome do projeto'] || m.nome || 'Meu Projeto',
-    startDate: m.startDate || m['data inicial'] || m['start date'] || new Date().toISOString().split('T')[0],
-    manager: m.manager || m.gerente || '',
-    tasksFile: m.tasksFile || m['arquivo de tarefas'] || m['tasks file'] || 'tarefas.csv',
-    color: safeColor(m.color, '#6c5ce7')
-  }));
-}
-
-// Backward-compatible CSV header aliases for reading (lowercase)
-const CSV_READ_ALIASES = {
-  task: ['tarefa', 'name'],
-  percent: ['progresso', 'concluido', 'percentagem'],
-  duration: ['dias', 'duracao'],
-  predecessor: ['predecessora'],
-  type: ['tipo'],
-  plannedStart: ['data_inicial_planejada', 'planned_start'],
-  plannedEnd: ['data_final_planejada', 'planned_end'],
-  realStart: ['data_inicial_real', 'actual_start', 'real_start'],
-  realEnd: ['data_final_real', 'actual_end', 'real_end'],
-  baselineStart: ['data_inicial_baseline', 'baseline_start'],
-  baselineEnd: ['data_final_baseline', 'baseline_end'],
-  baselineDate: ['baseline_data', 'baseline_date']
-};
+import {
+  BAR_COLORS,
+  ROW_H,
+  MONTHS_PT,
+  DAYS_PT,
+  CSV_WRITE_FIELDS,
+  CSV_READ_ALIASES,
+  isWeekend,
+  addDays,
+  parseDate,
+  getLocalISOString,
+  sanitizeCSV,
+  safeColor,
+  isValidProjectFile,
+  sanitizeFilename,
+  hasLocalStorageFiles,
+  checkCacheVersion,
+  encodeCacheEncrypted,
+  decodeCacheEncrypted,
+  toInputDateFormat,
+  formatDatePT,
+  getDayOfWeekPT,
+  getDB,
+  STORE_NAME,
+  KEY_NAME,
+  saveHandleToDB,
+  loadHandleFromDB,
+  normalizePortfolioProjects
+} from './src/frontend/core.js';
 
 const mapCSVRow = (obj) => {
   const out = {};
@@ -511,6 +167,9 @@ const App = {
     const portfolioMeta = ref(null);
     const showPortfolioInfo = ref(false);
     const showPortfolioEditModal = ref(false);
+    let handleGlobalKeydown = null;
+    let handleBeforeUnload = null;
+    let handleDocumentClick = null;
     const tempPortfolioMeta = ref({ name: '', description: '', manager: '', baseDate: '', color: '#0984e3' });
     const tempProjectMetadata = ref({ name: '', manager: '', startDate: '', color: '#6c5ce7' });
     const newHolidayDate = ref('');
@@ -541,6 +200,24 @@ const App = {
       manager: '',
       tasksFile: 'tarefas.csv'
     });
+    const hasActiveProject = computed(() => hasFolder.value && !!projectMetadata.value?.name && projectMetadata.value.name !== 'Nome do Projeto');
+    const effectivePortfolioMeta = computed(() => {
+      if (portfolioMeta.value && portfolioMeta.value.name) {
+        return {
+          ...portfolioMeta.value,
+          color: safeColor(portfolioMeta.value.color, '#6c5ce7')
+        };
+      }
+      return {
+        name: directoryHandle.value?.name || 'Portfólio Local',
+        description: '',
+        manager: projectMetadata.value?.manager || '',
+        baseDate: projectMetadata.value?.startDate || '',
+        color: '#6c5ce7',
+        createdAt: ''
+      };
+    });
+    const hasPortfolioContext = computed(() => hasFolder.value && (projectOptions.value.length > 0 || !!effectivePortfolioMeta.value?.name));
 
     const holidaysMap = ref({}); // { 'YYYY-MM-DD': 'Name' }
     const tasks = ref([]);
@@ -619,6 +296,16 @@ const App = {
           }
         };
       });
+    };
+
+    const confirmWithFallback = async (message, title = 'Confirmação', type = 'warn') => {
+      try {
+        const result = await showCustomConfirm(message, title, type);
+        if (typeof result === 'boolean') return result;
+      } catch (err) {
+        console.warn('Custom confirm failed, using native confirm.', err);
+      }
+      return window.confirm(message);
     };
 
     const isWorkingDay = (date) => {
@@ -706,26 +393,42 @@ const App = {
       } catch { return null; }
     };
 
-    const promptFileImport = () => {
+    const promptFileImport = ({ allowDirectory = true } = {}) => {
       return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.csv,.json';
         input.multiple = true;
-        input.webkitdirectory = true;
+        if (allowDirectory) {
+          // Fallback mode (no File System Access API): allow selecting a folder when supported.
+          // Some Chromium builds only honor this when the attribute is present.
+          input.setAttribute('webkitdirectory', '');
+          input.webkitdirectory = true;
+        }
+        input.style.position = 'fixed';
+        input.style.left = '-10000px';
+        input.style.top = '-10000px';
+
+        const cleanup = () => {
+          try { document.body.removeChild(input); } catch {}
+        };
+
         input.onchange = async () => {
           const files = input.files;
-          if (!files || !files.length) { resolve({}); return; }
+          if (!files || !files.length) { cleanup(); resolve({}); return; }
           const result = {};
           for (let i = 0; i < files.length; i++) {
-            if (files[i].name.endsWith('.csv') || files[i].name.endsWith('.json')) {
+            const lower = (files[i].name || '').toLowerCase();
+            if (lower.endsWith('.csv') || lower.endsWith('.json')) {
               try {
                 result[files[i].name] = await files[i].text();
               } catch {}
             }
           }
+          cleanup();
           resolve(result);
         };
+        document.body.appendChild(input);
         input.click();
       });
     };
@@ -904,7 +607,9 @@ const App = {
     };
 
     const openPortfolioSettings = () => {
-      if (!portfolioMeta.value) return;
+      if (!portfolioMeta.value) {
+        portfolioMeta.value = { ...effectivePortfolioMeta.value };
+      }
       tempPortfolioMeta.value = {
         name: portfolioMeta.value.name || '',
         description: portfolioMeta.value.description || '',
@@ -912,6 +617,8 @@ const App = {
         baseDate: portfolioMeta.value.baseDate || '',
         color: safeColor(portfolioMeta.value.color, '#0984e3')
       };
+      showPortfolioInfo.value = false;
+      showMoreMenu.value = false;
       showPortfolioEditModal.value = true;
     };
 
@@ -926,6 +633,20 @@ const App = {
       };
       localStorage.setItem('portfolioMeta', await encodeCacheEncrypted(portfolioMeta.value));
       showPortfolioEditModal.value = false;
+    };
+
+    const togglePortfolioInfo = () => {
+      showMoreMenu.value = false;
+      showPortfolioInfo.value = !showPortfolioInfo.value;
+    };
+
+    const openPortfolioInfo = () => {
+      showMoreMenu.value = false;
+      showPortfolioInfo.value = true;
+    };
+
+    const closePortfolioInfo = () => {
+      showPortfolioInfo.value = false;
     };
 
     // Holidays Saver
@@ -1100,11 +821,23 @@ const App = {
     };
 
     const handleSelectedFolderManifest = async () => {
+      if (directoryHandle.value) {
+        try {
+          const files = [];
+          for await (const entry of directoryHandle.value.values()) {
+            if (entry && entry.kind === 'file') files.push(entry.name);
+          }
+          console.info('[handleSelectedFolderManifest] Folder files:', files);
+        } catch (err) {
+          console.warn('[handleSelectedFolderManifest] Could not list folder entries:', err);
+        }
+      }
+
       const portfolioContent = await readFileFromDisk('portfolio.json');
       const holidaysContent = await readFileFromDisk('feriados.json');
 
       if (!portfolioContent && !holidaysContent) {
-        const proceed = await showCustomConfirm(
+        const proceed = await confirmWithFallback(
           'A pasta selecionada não possui portfolio.json nem feriados.json. Isso indica que ainda não há nenhum projeto registrado neste portfólio. Deseja seguir em frente e criar um novo portfólio nesta pasta?',
           'Criar novo portfólio?',
           'info'
@@ -1134,7 +867,7 @@ const App = {
       }
 
       if (projects.length === 0) {
-        const proceed = await showCustomConfirm(
+        const proceed = await confirmWithFallback(
           'O arquivo portfolio.json existe, mas não possui nenhum projeto registrado. Deseja criar o primeiro projeto deste portfólio?',
           'Portfólio sem projetos',
           'info'
@@ -1267,7 +1000,12 @@ const App = {
     };
 
     const buildTimeline = () => {
-      if (!tasks.value.length) return;
+      if (!tasks.value.length) {
+        allDays.value = [];
+        chartColumns.value = [];
+        chartMonths.value = [];
+        return;
+      }
       let minT = null, maxT = null;
       tasks.value.forEach(t => {
         if (!minT || t.start < minT) minT = t.start;
@@ -1364,12 +1102,45 @@ const App = {
       const dayIdx = allDays.value.findIndex(d => d.getTime() >= date.getTime());
       if (dayIdx < 0) return 0;
       if (zoomLevel.value === 'day') return dayIdx * colWidth.value;
-      if (zoomLevel.value === 'week') return (dayIdx / 7) * colWidth.value;
+      if (zoomLevel.value === 'week') {
+        const weekIndex = Math.floor(dayIdx / 7);
+        const dayOffset = dayIdx % 7;
+        return (weekIndex * colWidth.value) + ((dayOffset / 7) * colWidth.value);
+      }
       
       const startM = allDays.value[0];
       const monthsDiff = (date.getFullYear() - startM.getFullYear()) * 12 + (date.getMonth() - startM.getMonth());
-      const dayInMonth = date.getDate();
-      return (monthsDiff * colWidth.value) + (dayInMonth / 30 * colWidth.value);
+      const dayInMonth = date.getDate() - 1;
+      const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      return (monthsDiff * colWidth.value) + ((dayInMonth / daysInMonth) * colWidth.value);
+    };
+
+    const getTailWidth = (date) => {
+      if (!date) return colWidth.value;
+      if (zoomLevel.value === 'day') return colWidth.value;
+      if (zoomLevel.value === 'week') return colWidth.value / 7;
+      const daysInMonth = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+      return colWidth.value / daysInMonth;
+    };
+
+    const alignChartViewport = () => {
+      const chart = document.getElementById('chartArea');
+      if (!chart) return;
+      if (!filteredTasks.value.length) {
+        chart.scrollLeft = 0;
+        return;
+      }
+      const starts = filteredTasks.value
+        .map(t => t?.start)
+        .filter(Boolean)
+        .map(d => getPos(d));
+      if (!starts.length) {
+        chart.scrollLeft = 0;
+        return;
+      }
+      const minStart = Math.max(0, Math.min(...starts) - (colWidth.value * 2));
+      const maxLeft = Math.max(0, chart.scrollWidth - chart.clientWidth);
+      chart.scrollLeft = Math.min(minStart, maxLeft);
     };
 
     const openProjectFolder = async () => {
@@ -1391,20 +1162,30 @@ const App = {
         }
       }
       // Fallback: import files via file input
-      const files = await promptFileImport();
+      let files = await promptFileImport({ allowDirectory: true });
       const entries = Object.entries(files);
-      if (entries.length === 0) return;
-      for (const [name, content] of entries) {
-        localStorage.setItem('gantt_fs_' + name, await encodeCacheEncrypted(content));
+      if (entries.length === 0) {
+        addToast('Este navegador nao conseguiu ler a pasta selecionada. Selecione manualmente os arquivos portfolio.json, feriados.json e o CSV do projeto.', 'warn', 8000);
+        files = await promptFileImport({ allowDirectory: false });
+      }
+      const entries2 = Object.entries(files);
+      if (entries2.length === 0) {
+        addToast('Importacao cancelada ou sem arquivos validos (.json/.csv).', 'warn', 6000);
+        return;
+      }
+      for (const [name, content] of entries2) {
+        // Store using sanitized name to match readFileFromDisk() lookups.
+        const safe = sanitizeFilename(name) || name;
+        localStorage.setItem('gantt_fs_' + safe, await encodeCacheEncrypted(content));
         const index = JSON.parse(localStorage.getItem('gantt_fs_index') || '[]');
-        if (!index.includes(name)) { index.push(name); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
+        if (!index.includes(safe)) { index.push(safe); localStorage.setItem('gantt_fs_index', JSON.stringify(index)); }
       }
       hasFolder.value = true;
       localStorage.setItem('hasFolder', 'true');
       const shouldLoadProject = await handleSelectedFolderManifest();
       if (!shouldLoadProject) return;
       await loadProject();
-      addToast(`📂 ${entries.length} arquivo(s) importado(s) via navegador. Use "Exportar" para salvar no disco.`, 'info', 5000);
+      addToast(`📂 ${entries2.length} arquivo(s) importado(s) via navegador (modo fallback). Use "Exportar" para salvar no disco.`, 'info', 6000);
     };
 
     const closeProjectFolder = async () => {
@@ -1801,6 +1582,7 @@ const App = {
     const setZoom = (level) => {
       zoomLevel.value = level;
       buildTimeline();
+      nextTick(() => alignChartViewport());
     };
 
     const stats = computed(() => {
@@ -1885,7 +1667,7 @@ const App = {
     const getBarWidthPx = (t) => {
       if (t.duration === 0) return 0;
       const s = getPos(t.start);
-      const e = getPos(t.end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
+      const e = getPos(t.end) + getTailWidth(t.end);
       return Math.max(18, e - s - 4);
     };
     const getBarColor = (t, i) => {
@@ -1915,7 +1697,7 @@ const App = {
         }
       }
       const s = getPos(start);
-      const e = getPos(end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
+      const e = getPos(end) + getTailWidth(end);
       return Math.max(18, e - s - 4);
     };
 
@@ -1932,7 +1714,7 @@ const App = {
       const end = parseDate(t.baselineEnd);
       if (!start || !end) return 0;
       const s = getPos(start);
-      const e = getPos(end) + (zoomLevel.value === 'day' ? colWidth.value : colWidth.value / 7);
+      const e = getPos(end) + getTailWidth(end);
       return Math.max(10, e - s - 4);
     };
 
@@ -1950,15 +1732,15 @@ const App = {
     const hasAnyBaseline = computed(() => tasks.value.some(t => t.baselineStart || t.baselineEnd));
 
     const arrowPaths = computed(() => {
-      if (!tasks.value.length) return [];
+      if (!filteredTasks.value.length) return [];
       const paths = [];
-      tasks.value.forEach((t, i) => {
+      filteredTasks.value.forEach((t, i) => {
         if (!t.predecessor) return;
         const predStrs = String(t.predecessor).match(/\d+/g) || [];
         predStrs.forEach(pStr => {
-          const predIdx = tasks.value.findIndex(x => x.id === parseInt(pStr));
+          const predIdx = filteredTasks.value.findIndex(x => x.id === parseInt(pStr));
           if (predIdx < 0) return;
-          const pred = tasks.value[predIdx];
+          const pred = filteredTasks.value[predIdx];
           const pEnd = t.type === 'SS' ? getPos(pred.start) + 5 : getPos(pred.end) + (zoomLevel.value === 'day' ? colWidth.value : 5);
           const tStart = getPos(t.start);
           const y1 = predIdx * ROW_H + ROW_H / 2;
@@ -1970,10 +1752,10 @@ const App = {
     });
 
     const todayX = computed(() => {
-      if (!allDays.value.length) return -1;
+      if (!allDays.value.length || !chartColumns.value.length) return -1;
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const x = getPos(today);
-      if (x >= 0 && x <= (allDays.value.length * colWidth.value)) return x;
+      if (x >= 0 && x <= (chartColumns.value.length * colWidth.value)) return x;
       return -1;
     });
 
@@ -2481,7 +2263,7 @@ const App = {
       }
 
       // Keyboard Shortcuts
-      const handleGlobalKeydown = (e) => {
+      handleGlobalKeydown = (e) => {
         const isInputFocused = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
 
         if (e.key === 'Escape' && anyModalOpen.value) {
@@ -2559,7 +2341,7 @@ const App = {
       };
 
       // Warn before page unload if project is open
-      const handleBeforeUnload = (e) => {
+      handleBeforeUnload = (e) => {
         if (hasFolder.value && tasks.value.length > 0) {
           e.preventDefault();
           e.returnValue = '';
@@ -2567,15 +2349,10 @@ const App = {
       };
 
       // Close ⚙️ dropdown and portfolio overlay on outside click
-      const handleDocumentClick = (e) => {
+      handleDocumentClick = (e) => {
         const wrap = document.querySelector('.more-wrap');
         if (showMoreMenu.value && wrap && !wrap.contains(e.target)) {
           showMoreMenu.value = false;
-        }
-        const pt = document.querySelector('.portfolio-trigger');
-        const po = document.querySelector('.portfolio-overlay');
-        if (showPortfolioInfo.value && pt && po && !pt.contains(e.target) && !po.contains(e.target)) {
-          showPortfolioInfo.value = false;
         }
       };
 
@@ -2583,15 +2360,17 @@ const App = {
       window.addEventListener('beforeunload', handleBeforeUnload);
       document.addEventListener('click', handleDocumentClick);
 
-      onUnmounted(() => {
-        window.removeEventListener('keydown', handleGlobalKeydown);
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        document.removeEventListener('click', handleDocumentClick);
-      });
+    });
+
+    onUnmounted(() => {
+      if (handleGlobalKeydown) window.removeEventListener('keydown', handleGlobalKeydown);
+      if (handleBeforeUnload) window.removeEventListener('beforeunload', handleBeforeUnload);
+      if (handleDocumentClick) document.removeEventListener('click', handleDocumentClick);
     });
 
     return {
       hasFolder, directoryHandle, permissionStatus, zoomLevel, taskListWidth, hoverTaskId,
+      hasActiveProject, hasPortfolioContext, effectivePortfolioMeta,
       projectMetadata, tasks, holidaysMap,
       chartColumns, chartMonths, colWidth, arrowPaths, todayX,
       stats, donutBg, recalculateStatus, saving,
@@ -2605,7 +2384,7 @@ const App = {
       // Modals Control
       showProjectSelector, showProjectSettingsModal, showHolidaysModal, showEditModal, showExportModal, showNewProjectWizard, showMoreMenu,
       portfolioMeta, showPortfolioInfo, showPortfolioEditModal, tempPortfolioMeta,
-      openPortfolioSettings, savePortfolioSettings,
+      openPortfolioSettings, savePortfolioSettings, togglePortfolioInfo, openPortfolioInfo, closePortfolioInfo,
       wizardStep, wizardName, wizardManager, wizardColor, wizardStartDate, wizardIncludeHolidays, wizardTemplate,
 
       // Portfolio Wizard
